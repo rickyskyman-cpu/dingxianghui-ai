@@ -15,7 +15,7 @@ async function apiFetch(path, opts = {}) {
   if (t) headers["Authorization"] = "Bearer " + t;
   let res;
   try {
-    res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
+    res = await fetch(API_BASE + path + (path.includes("?") ? "&" : "?") + "forceFunctionRegion=ap-southeast-1", Object.assign({}, opts, { headers }));
   } catch (e) {
     return { ok: false, status: 0, json: async () => ({ detail: "网络请求失败，请检查网络后重试" }) };
   }
