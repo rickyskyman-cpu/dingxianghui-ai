@@ -18,7 +18,7 @@
       </div>
       <div class="demo-btn-group">
         <button class="demo-chip" id="demo-btn-guest" onclick="switchDemoRole('guest')">
-          🌐 游客视角（仅看首页介绍与公开数据）
+          🌐 游客视角（仅看首页介绍与规模量级）
         </button>
         <button class="demo-chip" id="demo-btn-pending" onclick="switchDemoRole('13800138001')">
           ① 待审核校友（王梓涵·测试审核拦截）
@@ -56,6 +56,9 @@
         </button>
         <button class="nav-btn" id="nav-auth" onclick="switchView('auth')">
           🪪 校友实名注册 / 登录
+        </button>
+        <button class="nav-btn" id="nav-feed" onclick="switchView('feed')" style="display:none;">
+          🔎 相关领域供需
         </button>
         <button class="nav-btn" id="nav-workspace" onclick="switchView('workspace')">
           🎙️ 个人能力与项目需求对接
@@ -141,143 +144,44 @@
         </div>
       </div>
 
-      <!-- 1B. 系统中已注册校友与商机的数据信息看板 -->
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">已实名认证校友</div>
-          <div class="kpi-value"><span id="stat-alumni-cnt">12</span><span class="kpi-unit">位</span></div>
-          <div class="kpi-sub">100% 校友卡核验通过</div>
-        </div>
-        <div class="kpi-card gold-top">
-          <div class="kpi-label">入驻校友硬科技企业</div>
-          <div class="kpi-value"><span id="stat-company-cnt">12</span><span class="kpi-unit">家</span></div>
-          <div class="kpi-sub">含多家专精特新与高新企业</div>
-        </div>
-        <div class="kpi-card lilac-top">
-          <div class="kpi-label">系统在库商机需求</div>
-          <div class="kpi-value"><span id="stat-demand-cnt">15</span><span class="kpi-unit">项</span></div>
-          <div class="kpi-sub">结构化供需实时在线匹配</div>
-        </div>
-        <div class="kpi-card teal-top">
-          <div class="kpi-label">AI累计精准匹配</div>
-          <div class="kpi-value"><span id="stat-match-cnt">31</span><span class="kpi-unit">次</span></div>
-          <div class="kpi-sub">平均匹配度 > 92%</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">覆盖核心产业城市</div>
-          <div class="kpi-value"><span id="stat-city-cnt">9</span><span class="kpi-unit">城</span></div>
-          <div class="kpi-sub">深/哈/京/沪/苏/杭/蓉/威/甬</div>
-        </div>
-        <div class="kpi-card gold-top">
-          <div class="kpi-label">当前待审核注册申请</div>
-          <div class="kpi-value"><span id="stat-pending-cnt">1</span><span class="kpi-unit">人</span></div>
-          <div class="kpi-sub">中心节点24h内复核</div>
+      <!-- 1B. 平台规模（未登录仅展示模糊量级，不展示任何具体项目与校友信息） -->
+      <div class="panel-card" style="margin-top:22px;">
+        <div class="panel-header"><div>
+          <h3 class="panel-title">📊 平台规模概览</h3>
+          <div style="font-size:13px;color:var(--text-muted);">丁香会为校友内部资源信息平台，以下仅展示数量级；具体项目、校友与供需信息仅对实名审核通过的校友开放。</div>
+        </div></div>
+        <div class="kpi-grid" id="fuzzy-stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));"></div>
+        <div style="text-align:center;margin-top:18px;">
+          <button class="btn btn-primary" onclick="switchView('auth')">🪪 实名注册 / 登录后查看校友供需信息</button>
         </div>
       </div>
+    </section>
 
-      <!-- 行业与城市分布可视化 -->
-      <div class="charts-grid">
-        <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">📊 已注册校友与商机 · 行业领域分布</div>
-              <div class="panel-subtitle">基于系统中已认证校友能力标签与在库商机统计</div>
-            </div>
-            <span class="badge badge-navy">硬科技主导</span>
-          </div>
-          <div class="bar-list" id="chart-industries"></div>
-        </div>
-
-        <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">🗺️ 已注册校友企业 · 城市与三校区分布</div>
-              <div class="panel-subtitle">一校三区（哈尔滨校本部 / 威海校区 / 深圳校区）校友产业集聚度</div>
-            </div>
-            <span class="badge badge-gold" id="campus-summary-badge">一校三区协同</span>
-          </div>
-          <div class="bar-list" id="chart-cities"></div>
-        </div>
-      </div>
-
-      <!-- 已注册校友与商机数据信息检索与脱敏展示区 -->
+    <!-- ==================== VIEW: 相关领域供需（仅登录校友） ==================== -->
+    <section class="view-section" id="view-feed">
       <div class="panel-card">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">🗂️ 系统中已注册校友与商机数据信息总览（脱敏公开看板）</div>
-            <div class="panel-subtitle">
-              首页严格仅展示项目介绍及系统中已注册的校友能力与商机数据（脱敏保护）。如需提交能力与需求，请先完成实名认证登录。
-            </div>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn btn-sm btn-outline" onclick="resetHomeFilters()">重置筛选</button>
-          </div>
+        <div class="panel-header"><div>
+          <h3 class="panel-title">🔎 校友供需检索</h3>
+          <div style="font-size:13px;color:var(--text-muted);">仅对实名审核通过的校友开放。只展示标题、领域与摘要，联系方式需通过“双向匿名确认 / 中心节点撮合”获取。</div>
+        </div></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <input id="feed-search-kw" class="form-input" style="flex:2;min-width:200px;" placeholder="关键词：如 伺服、碳纤维、储能、出海…" onkeydown="if(event.key==='Enter')runFeedSearch()">
+          <select id="feed-search-industry" class="form-input" style="flex:1;min-width:140px;"><option value="">全部领域</option></select>
+          <select id="feed-search-type" class="form-input" style="flex:1;min-width:120px;"><option value="">供给+需求</option><option value="供给">只看供给</option><option value="需求">只看需求</option></select>
+          <button class="btn btn-primary" onclick="runFeedSearch()">搜索</button>
         </div>
-
-        <!-- 筛选栏 -->
-        <div class="filter-bar">
-          <input
-            type="text"
-            id="home-filter-kw"
-            class="filter-input"
-            placeholder="🔍 搜索行业、能力关键词、院系、城市或商机编号（如：碳纤维、六维力、具身智能、储能）..."
-            oninput="loadPublicOverview()"
-          />
-          <select id="home-filter-industry" class="filter-select" onchange="loadPublicOverview()">
-            <option value="">全部行业领域</option>
-            <option value="具身智能">具身智能 / 机器人</option>
-            <option value="航空航天">航空航天 / 低空经济</option>
-            <option value="新材料">新材料 / 碳纤维</option>
-            <option value="工业视觉">工业视觉 / 智能制造</option>
-            <option value="新能源">新能源 / 工商业储能</option>
-            <option value="精密仪器">精密仪器 / 传感器</option>
-            <option value="电力电子">电力电子 / 半导体</option>
-            <option value="人工智能">人工智能 / 大模型Agent</option>
-            <option value="生物医药">生物医药 / 手术机器人</option>
-            <option value="硬科技创投">硬科技创投</option>
-          </select>
-          <select id="home-filter-city" class="filter-select" onchange="loadPublicOverview()">
-            <option value="">全部所在城市</option>
-            <option value="深圳">深圳</option>
-            <option value="哈尔滨">哈尔滨</option>
-            <option value="北京">北京</option>
-            <option value="上海">上海</option>
-            <option value="苏州">苏州</option>
-            <option value="杭州">杭州</option>
-            <option value="成都">成都</option>
-            <option value="青岛">青岛</option>
-            <option value="宁波">宁波</option>
-          </select>
-          <select id="home-filter-campus" class="filter-select" onchange="loadPublicOverview()">
-            <option value="">全部毕业校区</option>
-            <option value="校本部(哈尔滨)">校本部(哈尔滨)</option>
-            <option value="威海校区">威海校区</option>
-            <option value="深圳校区">深圳校区</option>
-          </select>
-        </div>
-
-        <!-- 左右双栏：左栏 已注册校友数据列表 | 右栏 系统商机数据列表 -->
-        <div class="data-columns-grid">
-          <div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h3 style="font-size:15.5px; color:var(--hit-navy);">
-                👨‍🎓 已注册认证校友与能力数据（<span id="list-alumni-count">0</span> 位）
-              </h3>
-              <span class="badge badge-success">实名与校友卡已核验</span>
-            </div>
-            <div id="public-alumni-list"></div>
-          </div>
-
-          <div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h3 style="font-size:15.5px; color:var(--hit-navy);">
-                💼 系统中已发布商机需求数据（<span id="list-demand-count">0</span> 条）
-              </h3>
-              <span class="badge badge-lilac">AI实时计算匹配度</span>
-            </div>
-            <div id="public-demand-list"></div>
-          </div>
-        </div>
+        <div id="feed-search-results" style="margin-top:14px;"></div>
+      </div>
+      <div class="panel-card" style="margin-top:20px;">
+        <div class="panel-header"><div>
+          <h3 class="panel-title">🧭 与我相关领域的校友供需</h3>
+          <div id="feed-my-fields" style="font-size:13px;color:var(--text-muted);"></div>
+        </div></div>
+        <div id="feed-posts"></div>
+      </div>
+      <div class="panel-card" style="margin-top:20px;">
+        <div class="panel-header"><div><h3 class="panel-title">🤝 相关领域校友能力（供给方）</h3></div></div>
+        <div id="feed-alumni"></div>
       </div>
     </section>
 

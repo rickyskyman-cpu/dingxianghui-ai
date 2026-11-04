@@ -75,7 +75,7 @@ function showToast(msg, duration = 4200) {
 // ==================== Navigation & View Switching ====================
 function switchView(viewName) {
   currentView = viewName;
-  ["home", "auth", "workspace", "admin"].forEach((v) => {
+  ["home", "auth", "feed", "workspace", "admin"].forEach((v) => {
     const sec = document.getElementById(`view-${v}`);
     const nav = document.getElementById(`nav-${v}`);
     if (sec) sec.classList.toggle("active", v === viewName);
@@ -84,6 +84,8 @@ function switchView(viewName) {
 
   if (viewName === "home") {
     loadPublicOverview();
+  } else if (viewName === "feed") {
+    loadFeedView();
   } else if (viewName === "workspace") {
     renderWorkspaceView();
   } else if (viewName === "admin") {
@@ -95,6 +97,10 @@ function switchView(viewName) {
 function updateHeaderUserStatus() {
   const pill = document.getElementById("header-user-status");
   if (!pill) return;
+  const logged = !!currentUser;
+  ["nav-feed", "nav-workspace"].forEach((id) => { const e = document.getElementById(id); if (e) e.style.display = logged ? "" : "none"; });
+  const na = document.getElementById("nav-admin"); if (na) na.style.display = logged && isAdminRole(currentUser) ? "" : "none";
+  if (!logged && ["feed", "workspace", "admin"].includes(currentView)) switchView("home");
 
   // Highlight demo bar chip
   const allChips = document.querySelectorAll(".demo-chip");
@@ -175,172 +181,66 @@ async function switchDemoRole(phoneOrGuest) {
 }
 
 // ==================== VIEW 1: Homepage Public Overview & Data Directory ====================
-function resetHomeFilters() {
-  document.getElementById("home-filter-kw").value = "";
-  document.getElementById("home-filter-industry").value = "";
-  document.getElementById("home-filter-city").value = "";
-  document.getElementById("home-filter-campus").value = "";
-  loadPublicOverview();
-}
-
 async function loadPublicOverview() {
-  const kw = document.getElementById("home-filter-kw")?.value || "";
-  const ind = document.getElementById("home-filter-industry")?.value || "";
-  const city = document.getElementById("home-filter-city")?.value || "";
-  const campus = document.getElementById("home-filter-campus")?.value || "";
-
-  const params = new URLSearchParams({
-    keyword: kw,
-    industry: ind,
-    city: city,
-    campus: campus,
-  });
-
+  const box = document.getElementById("fuzzy-stats-grid");
+  if (!box) return;
   try {
-    const res = await apiFetch(`/api/public/overview?${params.toString()}`);
-    const data = await res.json();
+    const r = await apiFetch("/api/public/overview");
+    const d = await r.json();
+    const icons = { alumni: "🎓", demands: "📁", daily_queries: "🔍", successes: "🤝", sponsors: "🌸" };
+    box.innerHTML = d.stats.map((s) => `
+      <div class="kpi-card">
+        <div class="kpi-label">${icons[s.key] || ""} ${s.label}</div>
+        <div class="kpi-value">${s.level}</div>
+        <div class="kpi-sub">数量级展示</div>
+      </div>`).join("");
+  } catch (e) { box.innerHTML = '<div style="color:var(--text-muted)">规模数据加载失败</div>'; }
+}
 
-    // Update KPI cards
-    document.getElementById("stat-alumni-cnt").textContent = data.stats.verified_alumni_count;
-    document.getElementById("stat-company-cnt").textContent = data.stats.alumni_companies_count;
-    document.getElementById("stat-demand-cnt").textContent = data.stats.total_demands_count;
-    document.getElementById("stat-match-cnt").textContent = data.stats.successful_matches_count;
-    document.getElementById("stat-city-cnt").textContent = data.stats.covered_cities_count;
-    document.getElementById("stat-pending-cnt").textContent = data.stats.pending_audit_count;
+function postCard(p) {
+  const tags = (p.tags || []).slice(0, 4).map((t) => `<span class="badge ${(p.related_fields || []).includes(t) ? "badge-gold" : "badge-navy"}">${t}</span>`).join(" ");
+  return `<div class="data-item-card" style="border-left:4px solid ${p.post_type === "供给" ? "#0d9488" : "#7c3aed"}">
+    <div class="item-top-line"><div>
+      <span class="badge ${p.post_type === "供给" ? "badge-success" : "badge-lilac"}">${p.post_type}</span>
+      <span class="item-name">${p.title}</span>${p.is_mine ? ' <span class="badge badge-gold">我发布的</span>' : ""}
+    </div><span style="font-size:12px;color:var(--text-muted)">${p.created_at || ""}</span></div>
+    <div style="font-size:13px;color:var(--text-secondary);margin:6px 0;">${p.summary}</div>
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;font-size:12.5px;">
+      <span>🏷️ ${p.industry} · ${p.category} ${tags}</span>
+      <span style="color:var(--text-muted)">发布校友：${p.poster}</span>
+    </div></div>`;
+}
 
-    // Render Industry Distribution Bar Chart
-    const indContainer = document.getElementById("chart-industries");
-    const maxInd = Math.max(...data.distributions.industries.map((i) => i.count), 1);
-    indContainer.innerHTML = data.distributions.industries
-      .map(
-        (item) => `
-        <div class="bar-row">
-          <div class="bar-label">${item.name}</div>
-          <div class="bar-track">
-            <div class="bar-fill" style="width:${Math.round((item.count / maxInd) * 100)}%"></div>
-          </div>
-          <div class="bar-count">${item.count} 项</div>
-        </div>
-      `
-      )
-      .join("");
-
-    // Render City & Campus Distribution Bar Chart
-    const cityContainer = document.getElementById("chart-cities");
-    const maxCity = Math.max(...data.distributions.cities.map((i) => i.count), 1);
-    cityContainer.innerHTML = data.distributions.cities
-      .map(
-        (item) => `
-        <div class="bar-row">
-          <div class="bar-label">${item.name}</div>
-          <div class="bar-track">
-            <div class="bar-fill gold" style="width:${Math.round((item.count / maxCity) * 100)}%"></div>
-          </div>
-          <div class="bar-count">${item.count} 家</div>
-        </div>
-      `
-      )
-      .join("");
-
-    if (data.distributions.campuses?.length) {
-      const campusText = data.distributions.campuses.map((c) => `${c.name.replace("(哈尔滨)", "")}:${c.count}`).join(" | ");
-      document.getElementById("campus-summary-badge").textContent = campusText;
-    }
-
-    // Render Registered Alumni Data List
-    document.getElementById("list-alumni-count").textContent = data.alumni_list.length;
-    const alumniBox = document.getElementById("public-alumni-list");
-    if (data.alumni_list.length === 0) {
-      alumniBox.innerHTML = `<div style="padding:24px; text-align:center; color:var(--text-muted);">未找到符合筛选条件的已注册校友数据</div>`;
-    } else {
-      alumniBox.innerHTML = data.alumni_list
-        .map(
-          (u) => `
-          <div class="data-item-card">
-            <div class="item-top-line">
-              <div>
-                <span class="item-name">${u.masked_name}</span>
-                <span style="font-size:12.5px; color:var(--text-secondary); margin-left:6px;">
-                  ${u.enroll_year} · ${u.department}
-                </span>
-              </div>
-              <div style="display:flex; gap:6px;">
-                <span class="badge badge-navy">${u.campus.replace("(哈尔滨)", "")}</span>
-                <span class="badge badge-gold">📍 ${u.city}</span>
-              </div>
-            </div>
-            <div style="font-size:13px; font-weight:700; color:var(--hit-blue); margin-bottom:6px;">
-              🏢 ${u.masked_company} · ${u.position}
-            </div>
-            <div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px;">
-              <strong>核心能力：</strong>${u.core_capabilities}
-            </div>
-            <div class="tag-row">
-              ${u.can_provide_types.map((p) => `<span class="badge badge-success">可提供:${p}</span>`).join("")}
-              ${u.industry_tags.map((t) => `<span class="tag-chip">#${t}</span>`).join("")}
-            </div>
-          </div>
-        `
-        )
-        .join("");
-    }
-
-    // Render Registered Business Opportunity (Demands) List
-    document.getElementById("list-demand-count").textContent = data.demand_list.length;
-    const demandBox = document.getElementById("public-demand-list");
-    if (data.demand_list.length === 0) {
-      demandBox.innerHTML = `<div style="padding:24px; text-align:center; color:var(--text-muted);">未找到符合筛选条件的商机数据</div>`;
-    } else {
-      demandBox.innerHTML = data.demand_list
-        .map(
-          (d) => `
-          <div class="data-item-card">
-            <div class="item-top-line">
-              <div style="display:flex; align-items:center; gap:6px;">
-                <span class="badge badge-navy">${d.demand_code}</span>
-                <span class="badge badge-lilac">${d.category}</span>
-                <span class="badge badge-gold">📍 ${d.city}</span>
-              </div>
-              <span class="badge badge-success">🧠 最高AI匹配度 ${d.best_match_score}%</span>
-            </div>
-            <div class="item-name" style="margin-bottom:6px;">${d.title}</div>
-            <div style="font-size:13px; color:var(--text-secondary); margin-bottom:8px;">
-              ${d.description}
-            </div>
-            <div style="font-size:12.5px; color:var(--hit-blue); font-weight:600; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
-              <span>💰 ${d.budget_scale}</span>
-              <span>👤 发布校友：${d.publisher_masked}</span>
-            </div>
-            <div class="tag-row" style="justify-content:space-between; align-items:center; margin-top:10px;">
-              <div style="display:flex; gap:5px; flex-wrap:wrap;">
-                ${d.tags.map((t) => `<span class="tag-chip">#${t}</span>`).join("")}
-              </div>
-              <button class="btn btn-sm btn-outline" onclick="inspectDemandMatchFromHome(${d.id})">
-                查看AI匹配报告 →
-              </button>
-            </div>
-          </div>
-        `
-        )
-        .join("");
-    }
-  } catch (err) {
-    console.error("Failed to load public overview:", err);
+async function loadFeedView() {
+  const postsBox = document.getElementById("feed-posts");
+  const r = await apiFetch("/api/feed");
+  const d = await r.json();
+  if (!r.ok) {
+    postsBox.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);">🔒 ${d.detail || "请先登录"}</div>`;
+    document.getElementById("feed-alumni").innerHTML = ""; return;
+  }
+  document.getElementById("feed-my-fields").textContent = d.my_fields.length ? `按您的画像领域推荐：${d.my_fields.join("、")}` : "您尚未完善个人能力画像，以下为最新发布";
+  postsBox.innerHTML = d.posts.length ? d.posts.map(postCard).join("") : '<div style="color:var(--text-muted)">暂无相关领域发布</div>';
+  document.getElementById("feed-alumni").innerHTML = d.alumni.map((a) => `<div class="data-item-card">
+    <div class="item-top-line"><span class="item-name">${a.poster}</span><span style="font-size:12px;color:var(--text-muted)">${a.city || ""}</span></div>
+    <div style="font-size:13px;color:var(--text-secondary);margin:4px 0;">${a.capability_summary}</div>
+    <div>${a.industry_tags.map((t) => `<span class="badge ${a.related_fields.includes(t) ? "badge-gold" : "badge-navy"}">${t}</span>`).join(" ")}</div></div>`).join("") || '<div style="color:var(--text-muted)">暂无</div>';
+  const sel = document.getElementById("feed-search-industry");
+  if (sel.options.length <= 1) {
+    const inds = ["具身智能","航空航天","低空经济","商业航天","新能源","工商业储能","新材料","碳纤维","智能制造","精密加工","工业视觉","人工智能","大模型Agent","半导体装备","电力电子","伺服系统","精密仪器","生物医药","手术机器人","节能环保","海洋工程","硬科技创投","出海渠道"];
+    sel.innerHTML += inds.map((i) => `<option value="${i}">${i}</option>`).join("");
   }
 }
 
-async function inspectDemandMatchFromHome(demandId) {
-  if (!currentUser) {
-    // Switch to demo ready user so they can immediately view the full AI match report
-    await switchDemoRole("13800138003");
-  }
-  activeDemandIdForMatch = demandId;
-  switchView("workspace");
-  selectWorkspaceStep(3, true);
-  loadDemandMatchReport(demandId);
+async function runFeedSearch() {
+  const box = document.getElementById("feed-search-results");
+  const q = new URLSearchParams({ keyword: document.getElementById("feed-search-kw").value.trim(), industry: document.getElementById("feed-search-industry").value, type: document.getElementById("feed-search-type").value });
+  const r = await apiFetch(`/api/search?${q}`);
+  const d = await r.json();
+  if (!r.ok) { box.innerHTML = `<div style="color:var(--text-muted)">🔒 ${d.detail}</div>`; return; }
+  box.innerHTML = `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">共找到 ${d.total_shown} 条</div>` + (d.results.map(postCard).join("") || "");
 }
 
-// ==================== VIEW 2: Registration, Alumni Card OCR & Login ====================
 function fillSampleRegistration() {
   document.getElementById("reg-name").value = "许明远";
   document.getElementById("reg-phone").value = "139" + Math.floor(10000000 + Math.random() * 89999999);
@@ -840,19 +740,15 @@ async function handleCreateDemand(e) {
 
 // ==================== Step 3: Load & Render AI Smart Matching Report ====================
 async function populateDemandSelectorAndLoadMatch() {
-  const res = await apiFetch("/api/public/overview");
-  const data = await res.json();
   const sel = document.getElementById("match-demand-selector");
   if (!sel) return;
-
-  sel.innerHTML = data.demand_list
-    .map(
-      (d) =>
-        `<option value="${d.id}" ${d.id === activeDemandIdForMatch ? "selected" : ""}>${d.demand_code} · ${d.title.slice(0, 26)}...</option>`
-    )
-    .join("");
-
-  await loadDemandMatchReport(activeDemandIdForMatch || (data.demand_list[0]?.id ?? 1));
+  const res = await apiFetch("/api/me");
+  const data = res.ok ? await res.json() : {};
+  const list = data.my_demands || [];
+  if (!list.length) { sel.innerHTML = '<option value="">（您还没有发布需求，请先在第2步提交）</option>'; return; }
+  if (!list.some((d) => d.id === activeDemandIdForMatch)) activeDemandIdForMatch = list[0].id;
+  sel.innerHTML = list.map((d) => `<option value="${d.id}" ${d.id === activeDemandIdForMatch ? "selected" : ""}>${d.demand_code} · ${d.title.slice(0, 26)}...</option>`).join("");
+  await loadDemandMatchReport(activeDemandIdForMatch);
 }
 
 async function loadDemandMatchReport(demandId) {
@@ -1034,6 +930,7 @@ async function loadAdminDashboard() {
                 ? `<button class="btn btn-sm btn-primary" onclick="adminAuditUser(${u.id}, 'approve')">✅ 审核通过（放行入驻）</button>`
                 : `<button class="btn btn-sm btn-outline" onclick="adminAuditUser(${u.id}, 'reject')">设为待复核</button>`
             }
+            ${u.role === "alumni" ? `<button class="btn btn-sm ${u.is_sponsor ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/sponsor',{user_id:${u.id},sponsor:${!u.is_sponsor}})">${u.is_sponsor ? "🌸 赞助校友（点击取消）" : "标记为赞助校友"}</button>` : ""}
           </div>
         </div>
       </div>
@@ -1054,7 +951,8 @@ async function loadAdminDashboard() {
               ${m.broker_assisted ? "🏅 委托中心节点人工深度撮合" : "🤝 双向匿名确认"}
             </span>
           </div>
-          <span class="badge badge-success">${m.intent_status}</span>
+          <span><span class="badge badge-success">${m.intent_status}</span>
+          <button class="btn btn-sm ${m.is_success ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/match-success',{match_id:${m.id},success:${!m.is_success}})">${m.is_success ? "✅ 已对接成功（点击取消）" : "标记对接成功"}</button></span>
         </div>
         <div style="font-size:13px; color:var(--text-secondary); margin-bottom:4px;">
           ${m.ai_reason}
@@ -1081,4 +979,11 @@ async function adminAuditUser(userId, action) {
   } else {
     showToast(`❌ ${data.detail}`);
   }
+}
+
+async function adminToggle(path, body) {
+  const r = await apiFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const d = await r.json();
+  showToast(r.ok ? d.message : (d.detail || "操作失败"));
+  loadAdminDashboard();
 }
