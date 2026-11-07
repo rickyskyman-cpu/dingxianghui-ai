@@ -1,14 +1,32 @@
 // ===== API client (backend: Supabase Edge Function) =====
 const API_BASE = "https://lvmgyqbluhabhcrgdzex.supabase.co/functions/v1/dingxianghui-api";
 const TOKEN_KEY = "dxh_session_token";
-function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
-function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+const CARD_MAX_BYTES = 5 * 1024 * 1024;
+const CARD_TYPES = ["image/jpeg", "image/png", "image/webp"];
+function getToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+}
+function setToken(t) {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    if (t) sessionStorage.setItem(TOKEN_KEY, t);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch (e) {}
+}
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
 function deepEscape(v) {
-  if (typeof v === "string") return v.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (typeof v === "string") return esc(v);
   if (Array.isArray(v)) return v.map(deepEscape);
   if (v && typeof v === "object") { const o = {}; for (const k in v) o[k] = deepEscape(v[k]); return o; }
   return v;
 }
+function isDemoActor(u) { return !!(u && (u.is_demo || u.role === "demo_admin")); }
+function isRealAdmin(u) { return !!(u && u.role === "admin" && !u.is_demo); }
+function isApproved(u) { return !!(u && !isDemoActor(u) && u.audit_status === "approved"); }
 async function apiFetch(path, opts = {}) {
   const headers = Object.assign({}, opts.headers || {});
   const t = getToken();
@@ -37,43 +55,39 @@ let mediaRecorderInstance = null;
 let recordedAudioChunks = [];
 
 document.addEventListener("DOMContentLoaded", async () => {
-  await loadPublicOverview();
+  try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
   if (getToken()) {
     const r = await apiFetch("/api/me");
-    if (r.ok) { currentUser = (await r.json()).user; } else { setToken(""); }
+    if (r.ok) {
+      const user = (await r.json()).user;
+      if (isDemoActor(user)) {
+        await logoutCurrentUser(true);
+      } else {
+        currentUser = user;
+      }
+    } else setToken("");
   }
   updateHeaderUserStatus();
-  const params = new URLSearchParams(window.location.search);
-  const demo = params.get("demo");
-  if (demo === "pending") {
-    await switchDemoRole("13800138001");
-  } else if (demo === "profile") {
-    await switchDemoRole("13800138002");
-  } else if (demo === "demand") {
-    await switchDemoRole("13800138003");
-    await runPresetVoice("demand", "demand_sample_1");
-  } else if (demo === "match") {
-    await switchDemoRole("13800138003");
-    selectWorkspaceStep(3, true);
-    await loadDemandMatchReport(1);
-  } else if (demo === "admin") {
-    await switchDemoRole("13800138000");
+  if (location.search.includes("demo=")) {
+    history.replaceState(null, "", location.pathname);
+    showToast("演示入口已关闭。");
   }
 });
 
 function showToast(msg, duration = 4200) {
   const el = document.getElementById("global-toast");
   if (!el) return;
-  el.innerHTML = msg;
+  el.textContent = msg == null ? "" : String(msg);
   el.style.display = "block";
   clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => {
-    el.style.display = "none";
-  }, duration);
+  window.__toastTimer = setTimeout(() => { el.style.display = "none"; }, duration);
 }
 
 // ==================== Navigation & View Switching ====================
 function switchView(viewName) {
+  if (viewName === "feed" && !isApproved(currentUser)) viewName = currentUser ? "workspace" : "auth";
+  if (viewName === "workspace" && !currentUser) viewName = "auth";
+  if (viewName === "admin" && !isRealAdmin(currentUser)) viewName = "home";
   currentView = viewName;
   ["home", "auth", "feed", "workspace", "admin"].forEach((v) => {
     const sec = document.getElementById(`view-${v}`);
@@ -81,120 +95,101 @@ function switchView(viewName) {
     if (sec) sec.classList.toggle("active", v === viewName);
     if (nav) nav.classList.toggle("active", v === viewName);
   });
+  if (viewName === "feed") loadFeedView();
+  else if (viewName === "workspace") renderWorkspaceView();
+  else if (viewName === "admin") loadAdminDashboard();
+  else if (viewName === "auth") loadChannelStatus();
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+}
 
-  if (viewName === "home") {
-    loadPublicOverview();
-  } else if (viewName === "feed") {
-    loadFeedView();
-  } else if (viewName === "workspace") {
-    renderWorkspaceView();
-  } else if (viewName === "admin") {
-    loadAdminDashboard();
-  }
-  window.scrollTo({ top: 0, behavior: "smooth" });
+function showRegister() {
+  switchView("auth");
+  const name = document.getElementById("reg-name");
+  if (name) name.focus();
 }
 
 function updateHeaderUserStatus() {
   const pill = document.getElementById("header-user-status");
+  const logout = document.getElementById("logout-btn");
+  const feed = document.getElementById("nav-feed");
+  const workspace = document.getElementById("nav-workspace");
+  const admin = document.getElementById("nav-admin");
+  const approved = isApproved(currentUser);
+  if (feed) feed.hidden = !approved;
+  if (workspace) workspace.hidden = !currentUser;
+  if (admin) admin.hidden = !isRealAdmin(currentUser);
+  if (logout) logout.hidden = !currentUser;
   if (!pill) return;
-  const logged = !!currentUser;
-  ["nav-feed", "nav-workspace"].forEach((id) => { const e = document.getElementById(id); if (e) e.style.display = logged ? "" : "none"; });
-  const na = document.getElementById("nav-admin"); if (na) na.style.display = logged && isAdminRole(currentUser) ? "" : "none";
-  if (!logged && ["feed", "workspace", "admin"].includes(currentView)) switchView("home");
-
-  // Highlight demo bar chip
-  const allChips = document.querySelectorAll(".demo-chip");
-  allChips.forEach((c) => c.classList.remove("active"));
-
   if (!currentUser) {
-    pill.innerHTML = `<span>当前身份：未登录游客</span>`;
-    const g = document.getElementById("demo-btn-guest");
-    if (g) g.classList.add("active");
+    pill.textContent = "";
     return;
   }
-
-  let statusTag = "";
-  if (isAdminRole(currentUser)) {
-    statusTag = `<span class="badge badge-gold">${currentUser.role === "demo_admin" ? "演示管理员" : "中心节点管理员"}</span>`;
-    document.getElementById("demo-btn-admin")?.classList.add("active");
-  } else if (currentUser.audit_status !== "approved") {
-    statusTag = `<span class="badge badge-warning">待平台审核</span>`;
-    document.getElementById("demo-btn-pending")?.classList.add("active");
-  } else if (!currentUser.profile_completed) {
-    statusTag = `<span class="badge badge-navy">已过审·待填个人能力</span>`;
-    document.getElementById("demo-btn-uncompleted")?.classList.add("active");
-  } else {
-    statusTag = `<span class="badge badge-success">已认证·可提需求</span>`;
-    document.getElementById("demo-btn-ready")?.classList.add("active");
-  }
-
-  pill.innerHTML = `
-    <span>👤 <strong>${currentUser.real_name}</strong>（${currentUser.enroll_year}）</span>
-    ${statusTag}${currentUser.is_demo ? ' <span class="badge badge-lilac">演示账号</span>' : ""}
-  `;
+  const state = isRealAdmin(currentUser)
+    ? "管理员"
+    : currentUser.audit_status !== "approved"
+      ? "等待审核"
+      : currentUser.profile_completed ? "已通过审核" : "已通过审核，资料未完成";
+  pill.textContent = `${currentUser.real_name || ""} ${state}`;
 }
 
-// ==================== Demo Role Quick Switcher ====================
-async function switchDemoRole(phoneOrGuest) {
-  if (phoneOrGuest === "guest") {
-    if (getToken()) { apiFetch("/api/auth/logout", { method: "POST" }); }
-    setToken("");
-    currentUser = null;
-    updateHeaderUserStatus();
-    switchView("home");
-    showToast("🌐 已切换为【未登录游客视角】：仅浏览项目首页介绍与系统中已注册校友/商机脱敏数据。");
-    return;
+async function logoutCurrentUser(silent) {
+  const token = getToken();
+  setToken("");
+  currentUser = null;
+  if (token) {
+    try { await apiFetch("/api/auth/logout", { method: "POST" }); } catch (e) {}
   }
-
-  try {
-    const res = await apiFetch("/api/auth/demo-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: phoneOrGuest }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      showToast(`❌ 切换失败：${data.detail || "未知错误"}`);
-      return;
-    }
-    setToken(data.token);
-    currentUser = data.user;
-    updateHeaderUserStatus();
-
-    if (isAdminRole(currentUser)) {
-      switchView("admin");
-      showToast(`🛡️ 已切换为【演示管理员：${currentUser.real_name}】，仅可查看与审核演示数据（真实注册由正式管理员审核）。`);
-    } else {
-      switchView("workspace");
-      if (currentUser.audit_status !== "approved") {
-        showToast(`⏳ 已切换为【待审核校友：${currentUser.real_name}】，演示未通过平台审核前的拦截状态。`);
-      } else if (!currentUser.profile_completed) {
-        showToast(`📋 已切换为【已过审但未填个人情况：${currentUser.real_name}】，演示“必须先介绍清楚个人能力才能提需求”规则。`);
-      } else {
-        showToast(`🎙️ 已切换为【已完善画像校友：${currentUser.real_name}】，可直接语音提交项目需求并体验AI智能匹配！`);
-      }
-    }
-  } catch (err) {
-    console.error(err);
-    showToast("❌ 网络请求异常");
+  updateHeaderUserStatus();
+  if (!silent) {
+    switchView("home");
+    showToast("已退出。");
   }
 }
 
 // ==================== VIEW 1: Homepage Public Overview & Data Directory ====================
-async function loadPublicOverview() {
-  const box = document.getElementById("fuzzy-stats-grid");
-  if (!box) return;
+async function loadInternalOverview() {
+  const box = document.getElementById("internal-overview");
+  if (!box || !isApproved(currentUser)) return;
   try {
     const r = await apiFetch("/api/public/overview");
     const d = await r.json();
-    const icons = { alumni: "🎓", demands: "📁", daily_queries: "🔍", successes: "🤝", sponsors: "🌸" };
-    box.innerHTML = d.stats.map((s) => `
-      <div class="kpi-card">
-        <div class="kpi-label">${icons[s.key] || ""} ${s.label}</div>
-        <div class="kpi-value">${s.level}</div>
-        <div class="kpi-sub">数量级展示</div>
-      </div>`).join("");
-  } catch (e) { box.innerHTML = '<div style="color:var(--text-muted)">规模数据加载失败</div>'; }
+    const parts = (d.stats || []).map((s) => `${s.label || ""}${s.level || ""}`).filter(Boolean);
+    box.textContent = parts.length ? `数量级：${parts.join("，")}` : "";
+  } catch (e) { box.textContent = ""; }
+}
+
+async function loadChannelStatus() {
+  const box = document.getElementById("channel-status");
+  if (!box) return;
+  const r = await apiFetch("/api/auth/channels");
+  const d = r.ok ? await r.json() : {};
+  if (d.wechat_website || d.wechat_mp || d.sms) {
+    box.textContent = "部分渠道已由服务器打开。这里不会显示二维码或验证码，也不会把绑定说成严格双因子。";
+    return;
+  }
+  box.textContent = "微信扫码、微信内授权和短信都未启用。同时绑定也不等于每次登录都要再验一次，也不是严格双因子。";
+}
+
+function onAlumniCardSelected() {
+  const input = document.getElementById("reg-card-file");
+  const box = document.getElementById("ocr-result-box");
+  const file = input && input.files && input.files[0];
+  if (!box) return;
+  box.style.display = "block";
+  if (!file) { box.textContent = ""; return; }
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (!CARD_TYPES.includes(file.type) || !["jpg", "jpeg", "png", "webp"].includes(ext)) {
+    box.textContent = "只接受 JPG、PNG 或 WebP。";
+    input.value = "";
+    return;
+  }
+  if (file.size <= 0 || file.size > CARD_MAX_BYTES) {
+    box.textContent = "图片不能超过 5MB。";
+    input.value = "";
+    return;
+  }
+  box.textContent = "已检查类型和大小。自动识别未启用，图片没有上传，也不会被当成审核通过。";
 }
 
 function postCard(p) {
@@ -213,6 +208,11 @@ function postCard(p) {
 
 async function loadFeedView() {
   const postsBox = document.getElementById("feed-posts");
+  if (!isApproved(currentUser)) {
+    if (postsBox) postsBox.textContent = "审核通过后才能查看供需。";
+    return;
+  }
+  await loadInternalOverview();
   const r = await apiFetch("/api/feed");
   const d = await r.json();
   if (!r.ok) {
@@ -234,6 +234,10 @@ async function loadFeedView() {
 
 async function runFeedSearch() {
   const box = document.getElementById("feed-search-results");
+  if (!isApproved(currentUser)) {
+    if (box) box.textContent = "审核通过后才能检索。";
+    return;
+  }
   const q = new URLSearchParams({ keyword: document.getElementById("feed-search-kw").value.trim(), industry: document.getElementById("feed-search-industry").value, type: document.getElementById("feed-search-type").value });
   const r = await apiFetch(`/api/search?${q}`);
   const d = await r.json();
@@ -256,28 +260,7 @@ function fillSampleRegistration() {
 }
 
 async function triggerAlumniCardOCR() {
-  const cardNo = document.getElementById("reg-card-no").value;
-  const realName = document.getElementById("reg-name").value;
-  const enrollYear = document.getElementById("reg-year").value;
-  const department = document.getElementById("reg-dept").value;
-  const campus = document.getElementById("reg-campus").value;
-
-  const res = await apiFetch("/api/ai/ocr-alumni-card", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      card_no: cardNo,
-      real_name: realName,
-      enroll_year: enrollYear,
-      department: department,
-      campus: campus,
-    }),
-  });
-  const data = await res.json();
-  document.getElementById("reg-card-no").value = data.card_no;
-  const box = document.getElementById("ocr-result-box");
-  box.style.display = "block";
-  box.innerHTML = `✅ <strong>${data.verification_summary}</strong>（发卡机构：${data.issuer} · 置信度 ${data.confidence}）`;
+  onAlumniCardSelected();
 }
 
 async function handleRegisterSubmit(e) {
@@ -294,8 +277,12 @@ async function handleRegisterSubmit(e) {
     alumni_card_no: document.getElementById("reg-card-no").value,
     referrer_source: document.getElementById("reg-referrer").value,
     password: document.getElementById("reg-pwd").value,
-    is_demo: !!document.getElementById("reg-is-demo")?.checked,
+    is_demo: false,
   };
+  if (!passwordAcceptable(payload.password)) {
+    showToast("密码至少 8 位。");
+    return;
+  }
 
   const res = await apiFetch("/api/auth/register", {
     method: "POST",
@@ -328,15 +315,22 @@ async function handleLoginSubmit(e) {
     showToast(`❌ 登录失败：${data.detail}`);
     return;
   }
+  if (isDemoActor(data.user)) {
+    setToken(data.token);
+    await logoutCurrentUser(true);
+    showToast("演示账号已停用。");
+    return;
+  }
   setToken(data.token);
   currentUser = data.user;
   updateHeaderUserStatus();
-  showToast(`✅ ${data.message}`);
-  if (isAdminRole(currentUser)) {
-    switchView("admin");
-  } else {
-    switchView("workspace");
-  }
+  showToast(data.message || "已登录。");
+  if (isRealAdmin(currentUser)) switchView("admin");
+  else switchView("workspace");
+}
+
+function passwordAcceptable(password) {
+  return typeof password === "string" && password.length >= 8 && password.length <= 200;
 }
 
 // ==================== VIEW 3: Personal Profile, Voice Demand Submission & AI Smart Matching ====================
@@ -366,8 +360,11 @@ async function renderWorkspaceView() {
     approvedBox.style.display = "none";
     return;
   }
-  const qa = document.getElementById("quick-approve-btn");
-  if (qa) qa.style.display = currentUser.is_demo ? "inline-flex" : "none";
+  if (isDemoActor(currentUser)) {
+    await logoutCurrentUser(true);
+    showToast("演示账号不能再进入。");
+    return;
+  }
 
   if (currentUser.audit_status !== "approved") {
     unauthBox.style.display = "none";
@@ -454,15 +451,7 @@ async function renderWorkspaceView() {
 }
 
 async function quickApproveCurrentUser() {
-  if (!currentUser) return;
-  const res = await apiFetch("/api/demo/self-approve", { method: "POST" });
-  const data = await res.json();
-  if (!res.ok) { showToast(`❌ ${data.detail}`); return; }
-  if (res.ok) {
-    currentUser = data.user;
-    showToast(`✅ ${data.message}！现在请先完成【第一步：完善个人与企业情况介绍】。`);
-    renderWorkspaceView();
-  }
+  showToast("自助通过审核已关闭。");
 }
 
 function selectWorkspaceStep(stepNum, skipGateAlert = false) {
@@ -882,10 +871,15 @@ async function initiateMatchIntent(demandId, targetId, brokerAssisted) {
 
 // ==================== VIEW 4: Admin Audit & Central Node Console ====================
 async function loadAdminDashboard() {
+  if (!isRealAdmin(currentUser)) {
+    document.getElementById("admin-users-list").textContent = "只有管理员可以查看审核队列。";
+    document.getElementById("admin-matches-list").textContent = "";
+    return;
+  }
   const res = await apiFetch("/api/admin/dashboard");
   const data = await res.json();
   if (!res.ok) {
-    document.getElementById("admin-users-list").innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);">🔒 ${data.detail || "仅平台管理员可访问"}（请用管理员账号登录，或点击顶部“演示管理员”）</div>`;
+    document.getElementById("admin-users-list").textContent = data.detail || "只有管理员可以查看审核队列。";
     document.getElementById("admin-matches-list").innerHTML = "";
     return;
   }

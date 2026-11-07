@@ -1,5 +1,8 @@
-# 丁香会-AI时代 · 哈工大创业校友 AI 供需对接平台（演示站）
+# 丁香会
 
-- 前端：本仓库静态页面（GitHub Pages）
-- 后端：Supabase Edge Function `dingxianghui-api` + Postgres（独立 schema `dxh`）
-- 页面数据均为虚构演示数据；AI 语音结构化与校友卡识别为演示模拟。
+哈工大校友自发交流的地方，不是学校官方网站。
+
+- 公开页只放名称、一句说明、登录和注册，以及三个校区的建筑照片。
+- 供需、检索和数量级在审核通过后的页面里。
+- 可部署的 Edge Function 在 `supabase/functions/dingxianghui-api/index.ts`。这次没有部署。
+- 演示登录和自助过审默认关闭。微信与短信没有接入真实服务。
