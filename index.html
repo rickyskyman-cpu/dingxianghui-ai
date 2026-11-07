@@ -3,55 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>丁香会</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@600&display=swap" rel="stylesheet" />
+  <title>丁香会-哈工大创业校友联合会</title>
+  <link rel="stylesheet" href="design/tokens.css" />
+  <link rel="stylesheet" href="design/components.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <a class="skip" href="#main">跳到内容</a>
+  <p class="dx-disclaimer">校友自发交流平台，不是哈尔滨工业大学的官方网站，也不使用学校标志。</p>
   <header class="topbar">
-    <button class="mark" id="nav-home" onclick="switchView('home')">丁香会</button>
-    <nav class="topnav" aria-label="页面">
-      <button class="nav-btn" id="nav-auth" onclick="switchView('auth')">登录</button>
-      <button class="nav-btn" id="nav-feed" onclick="switchView('feed')" hidden>供需</button>
-      <button class="nav-btn" id="nav-workspace" onclick="switchView('workspace')" hidden>能力与需求</button>
-      <button class="nav-btn" id="nav-admin" onclick="switchView('admin')" hidden>审核</button>
-    </nav>
-    <div class="session" id="header-user-status"></div>
-    <button class="text-btn" id="logout-btn" hidden onclick="logoutCurrentUser()">退出</button>
+    <div class="dx-container topbar-inner">
+      <button class="dx-brand" id="nav-home" type="button" onclick="switchView('home')">丁香会<small>丁香会-哈工大创业校友联合会</small></button>
+      <nav class="topnav" aria-label="页面">
+        <button class="nav-btn" id="nav-auth" type="button" onclick="switchView('auth')">登录</button>
+        <button class="nav-btn" id="nav-feed" type="button" onclick="switchView('feed')" hidden>供需</button>
+        <button class="nav-btn" id="nav-workspace" type="button" onclick="switchView('workspace')" hidden>能力与需求</button>
+        <button class="nav-btn" id="nav-admin" type="button" onclick="switchView('admin')" hidden>审核</button>
+      </nav>
+      <div class="session" id="header-user-status"></div>
+      <button class="dx-button dx-button--text" id="logout-btn" type="button" hidden onclick="logoutCurrentUser()">退出</button>
+    </div>
   </header>
-  <main class="main-container">
+  <main id="main" class="main-container">
     <section class="view-section active" id="view-home">
-      <div class="gate">
-        <div class="gate-copy">
-          <div class="gate-text">
-            <h1>丁香会</h1>
+      <div class="dx-blueprint">
+        <div class="dx-container hero">
+          <div class="hero-copy">
+            <h1>汇聚资源，<br>共创未来</h1>
+            <p class="fullname">丁香会-哈工大创业校友联合会</p>
             <p class="identity">哈工大校友自发交流的地方。登录并经审核后，才能查看供需和检索。</p>
-            <p class="places">哈尔滨、威海、深圳，三个校区，同一所工科大学。</p>
             <div class="entry">
-              <button class="btn btn-primary" onclick="switchView('auth')">登录</button>
-              <button class="text-btn" onclick="showRegister()">注册</button>
+              <button class="dx-button" type="button" onclick="switchView('auth')">登录</button>
+              <button class="dx-button dx-button--secondary" type="button" onclick="showRegister()">注册</button>
             </div>
           </div>
-          <p class="plate">
-            <img src="assets/campus/harbin-main-tower.jpg" alt="哈尔滨主楼塔楼局部，取自学校英文网公开照片，已裁去校庆横幅" />
-          </p>
+          <figure class="schematic">
+            <img src="assets/dx/three-campuses.svg" alt="哈尔滨、威海、深圳三个节点的工程线稿，不是实景建筑，也不是官方标志" />
+            <figcaption>线稿表示三个校区之间的联系，不是地图，也不是校徽。</figcaption>
+          </figure>
         </div>
       </div>
-      <div class="campuses">
-        <div>
-          <img src="assets/campus/harbin-shaw.jpg" alt="哈尔滨校园中的邵逸夫科学馆，楼前有丁香花丛" />
-          <p class="caption">哈尔滨<span>邵逸夫科学馆</span></p>
-        </div>
-        <div>
-          <img src="assets/campus/weihai-main.jpg" alt="威海校区主楼秋景" />
-          <p class="caption">威海<span>主楼秋景</span><span>画面署名 Bach. 2013，许可未核实</span></p>
-        </div>
-        <div>
-          <img src="assets/campus/shenzhen-teaching.jpg" alt="深圳校区教学楼" />
-          <p class="caption">深圳<span>教学楼</span></p>
-        </div>
+      <div class="dx-container drawing-row" aria-hidden="true">
+        <img src="assets/dx/engineering-lines.svg" alt="" />
       </div>
     </section>
     <section class="view-section" id="view-feed"><div class="app-wrap">
@@ -223,7 +216,8 @@
 
         </div>
       </div>
-      <p class="quiet-line channel-box" id="channel-status">微信扫码、微信内授权和短信都未启用。同时绑定也不等于每次登录都要再验一次，也不是严格双因子。</p>
+          <p class="quiet-line channel-box" id="channel-status">微信扫码、微信内授权和短信都未启用。同时绑定也不等于每次登录都要再验一次，也不是严格双因子。</p>
+          <button class="dx-button dx-button--secondary" type="button" id="open-channel-dialog" onclick="document.getElementById('channel-dialog').showModal()">查看渠道说明</button>
     </div></section>
 
     <section class="view-section" id="view-workspace"><div class="app-wrap">
@@ -685,9 +679,17 @@
     </div></section>
   </main>
   <footer class="colophon">
-    <p>校友自发交流平台，不是哈尔滨工业大学的官方网站。</p>
-    <p>照片来自学校网站公开页面。转载许可没有核实，不代表学校授权，也不表示本站由学校运营。</p>
+    <div class="dx-container">
+      <p class="dx-brand">丁香会<small>汇聚资源，共创未来</small></p>
+      <p>丁香会-哈工大创业校友联合会。校友自发交流平台，不是哈尔滨工业大学的官方网站。</p>
+      <p>页面中的工程线稿是原创示意图，不是实景建筑，也不是学校标志。</p>
+    </div>
   </footer>
+  <dialog id="channel-dialog" class="dx-dialog" aria-labelledby="channel-dialog-title">
+    <h2 id="channel-dialog-title">微信与短信</h2>
+    <p>微信扫码、微信内授权和短信都没有接入。这里不会显示已启用，也不能当作两步验证或严格双因子。</p>
+    <button class="dx-button" type="button" id="close-channel-dialog" onclick="document.getElementById('channel-dialog').close()">关闭</button>
+  </dialog>
   <div class="toast-banner" id="global-toast" role="status"></div>
   <script src="app.js"></script>
 </body>
