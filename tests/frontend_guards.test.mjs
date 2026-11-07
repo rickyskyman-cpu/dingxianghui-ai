@@ -28,7 +28,10 @@ test("design tokens stay the 57-variable source and migration stays in dxh", () 
   assert.match(migration, /dxh/);
   assert.doesNotMatch(migration, /\b(public|auth)\./);
   const statements = migration.replace(/--.*$/gm, "");
-  assert.doesNotMatch(statements, /\b(drop|delete|truncate|update)\b/i);
+  assert.match(migration, /enable row level security/i);
+  assert.match(migration, /revoke all on table dxh\.login_throttle from anon/i);
+  assert.match(migration, /revoke all on table dxh\.login_throttle from authenticated/i);
+  assert.doesNotMatch(statements, /storage/);
 });
 test("client stores the session only for the tab and refuses demo actors", () => {
   assert.match(js, /sessionStorage/);

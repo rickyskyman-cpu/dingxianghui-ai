@@ -5,14 +5,12 @@ import type { Db, Row } from "./db.ts";
 type Any = any;
 const DEMO_PHONES = ["13800138001", "13800138002", "13800138003", "13800138000"];
 const SESSION_DAYS = 7;
-const LOGIN_LIMIT = 5;
-const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_WINDOW_SECONDS = 600;
+const PAIR_LIMIT = 5;
+const SOURCE_LIMIT = 30;
 const CARD_MAX = 5 * 1024 * 1024;
 const CARD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const AUDIO_TYPES = new Set(["audio/webm", "audio/wav", "audio/mpeg", "audio/mp4", "audio/ogg", "audio/webm;codecs=opus"]);
-
-const failures = new Map<string, number[]>();
-export function resetRateLimits() { failures.clear(); }
 
 export class HttpErr extends Error {
   status: number;
@@ -45,25 +43,14 @@ function corsHeaders(req: Request, env: Record<string, string | undefined>) {
   if (origin && allowlist(env).includes(origin)) headers["access-control-allow-origin"] = origin;
   return headers;
 }
-function rateOk(key: string) {
-  const t = Date.now();
-  const prev = (failures.get(key) || []).filter((x) => t - x < LOGIN_WINDOW_MS);
-  if (prev.length >= LOGIN_LIMIT) {
-    failures.set(key, prev);
-    return false;
-  }
-  return true;
-}
-function rateFail(key: string) {
-  const t = Date.now();
-  const prev = (failures.get(key) || []).filter((x) => t - x < LOGIN_WINDOW_MS);
-  prev.push(t);
-  failures.set(key, prev);
-}
-function rateClear(key: string) { failures.delete(key); }
 function clientIp(req: Request) {
   const xff = req.headers.get("x-forwarded-for") || "";
   return (xff.split(",")[0] || req.headers.get("x-real-ip") || "").trim().slice(0, 80);
+}
+function emptyResponse(status: number, headers: Record<string, string>) {
+  const next = { ...headers };
+  delete next["content-type"];
+  return new Response(null, { status, headers: next });
 }
 
 function privateUser(u: Any) {
@@ -244,18 +231,25 @@ async function register(db: Db, body: Any) {
 async function login(db: Db, env: Record<string, string | undefined>, req: Request, body: Any) {
   const phone = clean(body.phone, 30);
   const pw = String(body.password ?? "");
-  const ip = clientIp(req);
-  const phoneKey = `phone:${phone}`;
-  const ipKey = `ip:${ip || "none"}`;
-  if (!rateOk(phoneKey) || (ip && !rateOk(ipKey))) throw new HttpErr(429, "尝试过于频繁，请稍后再试");
+  const source = clientIp(req) || "unknown";
+  const pair = `p:${await sha256hex(phone)}:s:${await sha256hex(source)}`;
+  const src = `s:${await sha256hex(source)}`;
+  let pairCount = 0;
+  let sourceCount = 0;
+  try {
+    pairCount = await db.throttleBump(pair, LOGIN_WINDOW_SECONDS);
+    sourceCount = await db.throttlePeek(src, LOGIN_WINDOW_SECONDS);
+  } catch (e) {
+    throw new HttpErr(503, "登录保护暂不可用，请稍后再试");
+  }
+  if (pairCount > PAIR_LIMIT || sourceCount >= SOURCE_LIMIT) throw new HttpErr(429, "尝试过于频繁，请稍后再试");
   const user = await db.userByPhone(phone);
   const ok = user ? await verifyPw(pw, user.pw_hash) : (await hashPw(pw), false);
   if (!ok || (user && isDemoActor(user) && !demoEnabled(env))) {
-    rateFail(phoneKey);
-    if (ip) rateFail(ipKey);
+    try { await db.throttleBump(src, LOGIN_WINDOW_SECONDS); } catch (e) { throw new HttpErr(503, "登录保护暂不可用，请稍后再试"); }
     throw new HttpErr(401, "手机号或密码错误");
   }
-  rateClear(phoneKey);
+  try { await db.throttleClear(pair); } catch (e) { throw new HttpErr(503, "登录保护暂不可用，请稍后再试"); }
   await db.purgeExpiredSessions();
   const token = newToken();
   await db.insertSession(await sha256hex(token), user.id, SESSION_DAYS);
@@ -413,7 +407,7 @@ export async function handle(req: Request, ctx: { db: Db; env?: Record<string, s
       if (req.headers.get("origin") && !headers["access-control-allow-origin"]) {
         return new Response(JSON.stringify({ detail: "来源不在允许名单" }), { status: 403, headers });
       }
-      return new Response("ok", { status: 204, headers });
+      return emptyResponse(204, headers);
     }
     const url = new URL(req.url);
     const path = url.pathname.replace(/^\/(functions\/v1\/)?dingxianghui-api/, "") || "/";

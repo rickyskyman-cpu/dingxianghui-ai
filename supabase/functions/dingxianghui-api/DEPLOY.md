@@ -23,16 +23,20 @@
 
 ## 迁移
 
-`supabase/migrations/20261107120000_dxh_security_additive.sql` 只对 `dxh` 增加可空的微信字段、默认关闭的两步开关，以及一张空的登录计数表。
+`supabase/migrations/20261107120000_dxh_security_additive.sql` 只对 `dxh` 增加可空的微信字段、默认关闭的两步开关，以及 `dxh.login_throttle`。
 
-它不更新、不删除、不改密码、不改会话，也不动行级安全策略。行级安全没有在数据库里直接查看，不能写成已经通过。
+这张表开启行级安全，并撤销 `public`、`anon`、`authenticated` 的表权限。没有为这三方创建策略。函数用原来的 `SUPABASE_DB_URL` 连接，不走 anon key。表里只存账号和来源的哈希，不存密码。
 
-函数本身用进程内限速就能运行，不依赖先执行这段 SQL。执行前确认目标库已经有原来的 `dxh.users`。如果没有，停下来，不要另建一套业务表。
+它不修改已有业务行，不改已有六张表的策略，也不动 storage。已有六张表的行级安全是另一次只读核查看到的：已经开启且没有策略。这次迁移不重复改它们。
+
+登录限流依赖这张表。表不可用时登录返回 503，不会退回进程内计数。同一来源对同一账号连续失败会被拦住；管理员从另一个来源仍可用原来的密码登录。这不是全网分布式防火墙，只是所有函数实例共用的数据库计数。
+
+执行前确认目标库已经有原来的 `dxh.users`。如果没有，停下来，不要另建一套业务表。
 
 ## 建议顺序
 
-1. 在不指向生产库的环境跑 `node --test tests/edge_routes.test.ts`。
-2. 如需那三列和空表，对生产库只执行上述迁移。
-3. 部署函数时沿用原来的 `SUPABASE_DB_URL`，不要轮换，不要把演示开关设为 `true`。
-4. 同时发布本分支的前端。旧前端仍会调用演示登录；新函数会拒绝。
-5. 照片许可仍未核实。威海照片上的拍摄者署名要保留。未取得许可前，不要把使用这些照片说成已经获授权。
+1. 在不指向生产库的环境跑 `node --test --test-concurrency=1 tests/edge_routes.test.ts tests/security_policy.test.mjs tests/frontend_guards.test.mjs`。
+2. 先执行上述迁移，再部署函数。沿用原来的 `SUPABASE_DB_URL`，不要轮换，不要把演示开关设为 `true`。
+3. 前端和函数一起发布。不要只换页面。
+4. 不要改共享项目里的 storage，包括已有的 `demand-media`。当前注册只在 `dxh.users.alumni_card_img` 写入固定占位名，不上传文件。
+5. 上线后核对 `dxh.login_throttle` 的行级安全仍开启，且 anon、authenticated 没有表权限。已有六张表的策略这次没有改，验收时不要把它们写成新通过。

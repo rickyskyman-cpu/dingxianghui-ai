@@ -1,9 +1,9 @@
 -- Additive only. Touches schema dxh and no other schema.
--- Does not UPDATE, DELETE, DROP, TRUNCATE, change passwords, or rewrite sessions.
--- Does not enable, disable, or replace row level security.
--- Row level security on dxh was not inspected. Do not treat it as verified.
--- Run only after confirming the current database already has dxh.users from the existing app.
--- If dxh.users does not exist, stop. Do not create a second copy of the business tables.
+-- Does not UPDATE or DELETE existing business rows, change passwords, or rewrite sessions.
+-- Enables row level security only on the new dxh.login_throttle table.
+-- Does not change policies on the existing dxh tables and does not touch storage.
+-- Row level security on the existing six dxh tables was observed separately: enabled, with no policy.
+-- anon and authenticated already have no dxh schema usage. This migration still revokes them on the new table.
 
 alter table dxh.users add column if not exists wechat_unionid text;
 alter table dxh.users add column if not exists two_step_opt_in boolean not null default false;
@@ -17,4 +17,10 @@ create table if not exists dxh.login_throttle (
   window_started timestamptz not null default now()
 );
 
-comment on table dxh.login_throttle is 'Optional shared login counter. The function also limits in memory if this table is absent.';
+comment on table dxh.login_throttle is 'Shared login counters. Buckets are hashes of account and source, not passwords or raw addresses.';
+
+alter table dxh.login_throttle enable row level security;
+
+revoke all on table dxh.login_throttle from public;
+revoke all on table dxh.login_throttle from anon;
+revoke all on table dxh.login_throttle from authenticated;

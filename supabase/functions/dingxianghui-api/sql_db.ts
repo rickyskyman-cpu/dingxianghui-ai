@@ -156,5 +156,31 @@ export function createSqlDb(sql: any): Db {
       const [x] = await sql`update dxh.users set audit_status=${status}, audit_note=${note} where id=${id} returning *`;
       return x || null;
     },
+    async throttleBump(bucket, windowSeconds) {
+      const rows = await sql`
+        insert into dxh.login_throttle (bucket, failures, window_started)
+        values (${bucket}, 1, now())
+        on conflict (bucket) do update set
+          failures = case
+            when dxh.login_throttle.window_started <= now() - make_interval(secs => ${windowSeconds}) then 1
+            else dxh.login_throttle.failures + 1
+          end,
+          window_started = case
+            when dxh.login_throttle.window_started <= now() - make_interval(secs => ${windowSeconds}) then now()
+            else dxh.login_throttle.window_started
+          end
+        returning failures`;
+      return Number(rows[0].failures);
+    },
+    async throttlePeek(bucket, windowSeconds) {
+      const rows = await sql`
+        select failures from dxh.login_throttle
+        where bucket=${bucket}
+          and window_started > now() - make_interval(secs => ${windowSeconds})`;
+      return Number(rows[0]?.failures ?? 0);
+    },
+    async throttleClear(bucket) {
+      await sql`delete from dxh.login_throttle where bucket=${bucket}`;
+    },
   };
 }

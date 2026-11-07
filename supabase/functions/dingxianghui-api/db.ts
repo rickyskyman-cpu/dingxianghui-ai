@@ -34,4 +34,7 @@ export interface Db {
   adminMatches(demoOnly: boolean, limit: number): Promise<Row[]>;
   userById(id: number): Promise<Row | null>;
   setAudit(id: number, status: string, note: string): Promise<Row | null>;
+  throttleBump(bucket: string, windowSeconds: number): Promise<number>;
+  throttlePeek(bucket: string, windowSeconds: number): Promise<number>;
+  throttleClear(bucket: string): Promise<void>;
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handle, resetRateLimits } from "../supabase/functions/dingxianghui-api/http.ts";
+import { handle } from "../supabase/functions/dingxianghui-api/http.ts";
 import { hashPw } from "../supabase/functions/dingxianghui-api/crypto.ts";
 import { MemoryDb } from "../supabase/functions/dingxianghui-api/memory_db.ts";
 import { createSqlDb } from "../supabase/functions/dingxianghui-api/sql_db.ts";
@@ -27,10 +27,11 @@ async function seed() {
   return db;
 }
 
-function call(db: MemoryDb, path: string, opts: { method?: string; body?: unknown; token?: string; origin?: string; env?: Record<string, string> } = {}) {
+function call(db: MemoryDb, path: string, opts: { method?: string; body?: unknown; token?: string; origin?: string; env?: Record<string, string>; ip?: string } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.origin) headers.origin = opts.origin;
+  if (opts.ip) headers["x-forwarded-for"] = opts.ip;
   return handle(new Request("https://fn.local" + path, {
     method: opts.method || "GET",
     headers,
@@ -172,23 +173,51 @@ test("demo mode still cannot approve itself or read non-demo rows", async () => 
   assert.equal(demoUser.audit_note, "仍待审核");
 });
 
-test("cors is an allowlist and failed logins are limited", async () => {
-  resetRateLimits();
+test("preflight, login, and error responses keep legal bodies", async () => {
   const db = await seed();
+  const allowed = await call(db, "/api/auth/login", { method: "OPTIONS", origin: ALLOWED });
+  assert.equal(allowed.status, 204);
+  assert.equal(await allowed.text(), "");
+  assert.equal(allowed.headers.get("access-control-allow-origin"), ALLOWED);
+  assert.match(allowed.headers.get("access-control-allow-methods") || "", /POST/);
+  assert.equal(allowed.headers.get("access-control-allow-origin") === "*", false);
   const evil = await call(db, "/api/auth/login", { method: "OPTIONS", origin: "https://evil.example" });
   assert.equal(evil.status, 403);
   assert.equal(evil.headers.get("access-control-allow-origin"), null);
-  const ok = await call(db, "/api/health", { origin: ALLOWED });
-  assert.equal(ok.headers.get("access-control-allow-origin"), ALLOWED);
-  assert.notEqual(ok.headers.get("access-control-allow-origin"), "*");
-  for (let i = 0; i < 5; i += 1) {
-    const res = await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000001", password: "wrong-pass" } });
-    assert.equal(res.status, 401);
-  }
-  const limited = await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000001", password: "TestAdmin1" } });
-  assert.equal(limited.status, 429);
-  const other = await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000003", password: "TestUser12" } });
-  assert.equal(other.status, 200);
+  const bad = await call(db, "/api/auth/login", { method: "POST", origin: ALLOWED, body: { phone: "13900000001", password: "wrong-pass" } });
+  const badBody = await bad.json();
+  assert.equal(bad.status, 401);
+  assert.equal(typeof badBody.detail, "string");
+  const good = await call(db, "/api/auth/login", { method: "POST", origin: ALLOWED, ip: "203.0.113.10", body: { phone: "13900000003", password: "TestUser12" } });
+  const goodBody = await good.json();
+  assert.equal(good.status, 200);
+  assert.equal(typeof goodBody.token, "string");
+  assert.equal(good.headers.get("access-control-allow-origin"), ALLOWED);
+});
+
+test("shared throttle survives a second instance and does not lock another source", async () => {
+  const db = await seed();
+  const attacker = { ip: "203.0.113.8" };
+  const first = await Promise.all(Array.from({ length: 12 }, () =>
+    call(db, "/api/auth/login", { method: "POST", ip: attacker.ip, body: { phone: "13900000001", password: "wrong-pass" } })));
+  const statuses = await Promise.all(first.map((res) => res.status));
+  assert.equal(statuses.filter((status) => status === 401).length, 5);
+  assert.equal(statuses.filter((status) => status === 429).length, 7);
+  const secondInstance = await call(db, "/api/auth/login", { method: "POST", ip: attacker.ip, body: { phone: "13900000001", password: "TestAdmin1" } });
+  assert.equal(secondInstance.status, 429);
+  const adminElsewhere = await call(db, "/api/auth/login", { method: "POST", ip: "198.51.100.20", body: { phone: "13900000001", password: "TestAdmin1" } });
+  assert.equal(adminElsewhere.status, 200);
+  assert.equal(db.throttles.some((row) => row.bucket.includes("13900000001") || row.bucket.includes("TestAdmin1") || row.bucket.includes(attacker.ip)), false);
+});
+
+test("throttle dependency failure does not skip the check", async () => {
+  const db = await seed();
+  db.throttleBump = async () => { throw new Error("throttle unavailable"); };
+  const res = await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000001", password: "TestAdmin1" } });
+  const body = await res.json();
+  assert.equal(res.status, 503);
+  assert.equal(body.token, undefined);
+  assert.equal(db.sessions.length, 0);
 });
 
 test("wechat and sms routes stay closed without contacting a provider", async () => {

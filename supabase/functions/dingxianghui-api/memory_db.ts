@@ -10,6 +10,7 @@ export class MemoryDb implements Db {
   demands: Row[] = [];
   matches: Row[] = [];
   snapshots: Row[] = [];
+  throttles: { bucket: string; failures: number; window_started: number }[] = [];
   queriesToday = 0;
   private seq = { user: 1, demand: 1, match: 1, session: 1 };
 
@@ -170,5 +171,27 @@ export class MemoryDb implements Db {
     u.audit_status = status;
     u.audit_note = note;
     return clone(u);
+  }
+  async throttleBump(bucket: string, windowSeconds: number) {
+    const nowMs = Date.now();
+    let row = this.throttles.find((item) => item.bucket === bucket);
+    if (!row) {
+      row = { bucket, failures: 0, window_started: nowMs };
+      this.throttles.push(row);
+    } else if (nowMs - row.window_started >= windowSeconds * 1000) {
+      row.failures = 0;
+      row.window_started = nowMs;
+    }
+    row.failures += 1;
+    return row.failures;
+  }
+  async throttlePeek(bucket: string, windowSeconds: number) {
+    const nowMs = Date.now();
+    const row = this.throttles.find((item) => item.bucket === bucket);
+    if (!row || nowMs - row.window_started >= windowSeconds * 1000) return 0;
+    return row.failures;
+  }
+  async throttleClear(bucket: string) {
+    this.throttles = this.throttles.filter((item) => item.bucket !== bucket);
   }
 }
