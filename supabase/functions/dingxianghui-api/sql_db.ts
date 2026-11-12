@@ -128,6 +128,13 @@ export function createSqlDb(sql: any): Db {
         returning *`;
       return saved;
     },
+    async matchesByDemand(demandId) {
+      return await sql`select * from dxh.matches where demand_id=${demandId} order by match_score desc, id asc`;
+    },
+    async replaceDemandMatches(demandId, rows) {
+      await sql`delete from dxh.matches where demand_id=${demandId}`;
+      for (const row of rows) await this.insertMatch({ ...row, demand_id: demandId });
+    },
     async demandById(id) {
       const rows = await sql`select * from dxh.demands where id=${id}`;
       return rows[0] || null;

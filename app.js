@@ -748,7 +748,7 @@ function renderMatchReportUI(demand, report, matchSource) {
         <span class="dx-badge ${source === "deepseek" ? "dx-badge--amended" : "dx-badge--approved"}">${esc(sourceLabel)}</span>
       </div>
       <p>${esc(demand.description || "")}</p>
-      <p class="dx-help">${esc(report.summary_headline || "")}。${esc(report.strategy_advice || "分数用于排序参考，不是认证。")}</p>
+      <p class="dx-help">${esc(report.summary_headline || "")}。${esc(report.strategy_advice || "分数用于排序参考，不是认证。")}${report.model_name ? " 模型：" + esc(report.model_name) + "。" : ""}${report.created_at ? " 生成时间：" + esc(String(report.created_at).slice(0, 16).replace("T", " ")) + "。" : ""}</p>
     `;
   }
   const alumniContainer = document.getElementById("matched-alumni-container");

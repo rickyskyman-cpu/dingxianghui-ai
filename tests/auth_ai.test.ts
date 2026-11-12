@@ -170,6 +170,74 @@ test("wechat start rejects a return_to off the allowlist and get callback redire
   assert.equal(location.includes("#dxh_session="), true);
 });
 
+
+test("GET demand match returns the stored report and only falls back to rules when none exists", async () => {
+  const db = await seed();
+  const fetchImpl = (async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"rankings":[{"id":"u-4","score":91,"reason":"存储报告理由"}]}' } }] }), { status: 200 })) as typeof fetch;
+  const env = { DEEPSEEK_API_KEY: "sk-test", DEEPSEEK_MODEL: "deepseek-chat" };
+  const anon = await call(db, "/api/demands/1/match");
+  assert.equal(anon.status, 401);
+  const pendingToken = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000002", password: "TestUser12" } })).json()).token;
+  const pending = await call(db, "/api/demands/1/match", { token: pendingToken });
+  assert.equal(pending.status, 403);
+  const token = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000003", password: "TestUser12" } })).json()).token;
+  const created = await call(db, "/api/demands", {
+    method: "POST", token, env, fetchImpl,
+    body: { title: "寻找船舶配套", description: "需要海洋工程方向的配套能力，用于核对存储报告。", industry: "海洋工程", category: "找技术/联合研发", city: "威海" },
+  });
+  const createdBody = await created.json();
+  assert.equal(created.status, 200, JSON.stringify(createdBody));
+  assert.equal(createdBody.match_source, "deepseek");
+  const demandId = createdBody.demand.id;
+  db.users.push({
+    id: 8, phone: "13900000008", real_name: "后来", role: "alumni", is_demo: false, audit_status: "approved",
+    profile_completed: 1, industry_tags: '["海洋工程"]', core_capabilities: "后来加入的能力", campus: "深圳校区",
+    city: "深圳", company: "后厂", enroll_year: "2015级",
+  });
+  const reopened = await call(db, `/api/demands/${demandId}/match`, { token });
+  const again = await reopened.json();
+  assert.equal(reopened.status, 200, JSON.stringify(again));
+  assert.equal(again.match_source, "deepseek");
+  assert.equal(again.model_name, "deepseek-chat");
+  assert.equal(!!again.created_at, true);
+  assert.equal(again.match_report.match_source, "deepseek");
+  assert.equal(again.match_report.model_name, "deepseek-chat");
+  assert.equal(again.match_report.matched_alumni.length, 1);
+  assert.equal(again.match_report.matched_alumni[0].target_id, 4);
+  assert.equal(again.match_report.matched_alumni[0].match_score, 91);
+  assert.equal(again.match_report.matched_alumni[0].ai_reason, "存储报告理由");
+  assert.equal(again.match_report.matched_alumni.some((row: { target_id: number }) => row.target_id === 8), false);
+  const otherToken = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000004", password: "TestUser12" } })).json()).token;
+  const forbidden = await call(db, `/api/demands/${demandId}/match`, { token: otherToken });
+  assert.equal(forbidden.status, 404);
+  const adminToken = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000001", password: "TestAdmin1" } })).json()).token;
+  const asAdmin = await call(db, `/api/demands/${demandId}/match`, { token: adminToken });
+  const adminBody = await asAdmin.json();
+  assert.equal(asAdmin.status, 200);
+  assert.equal(adminBody.match_source, "deepseek");
+  const bare = await db.insertDemand({
+    demand_code: "DXH-2026-999", user_id: 3, title: "无存档需求", category: "找技术/联合研发", industry: "海洋工程",
+    city: "威海", description: "没有预先保存的匹配报告，应走规则匹配。", tags: '["海洋工程"]', is_demo: false,
+  });
+  const fresh = await call(db, `/api/demands/${bare.id}/match`, { token });
+  const freshBody = await fresh.json();
+  assert.equal(fresh.status, 200, JSON.stringify(freshBody));
+  assert.equal(freshBody.match_source, "规则匹配");
+  assert.equal(freshBody.model_name, null);
+  assert.equal(freshBody.match_report.matched_alumni.some((row: { target_id: number }) => row.target_id === 8), true);
+  const rematchFetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"rankings":[{"id":"u-8","score":77,"reason":"重配后的理由"}]}' } }] }), { status: 200 })) as typeof fetch;
+  const rematch = await call(db, `/api/demands/${demandId}/rematch`, { method: "POST", token, env, fetchImpl: rematchFetch });
+  const rematchBody = await rematch.json();
+  assert.equal(rematch.status, 200, JSON.stringify(rematchBody));
+  assert.equal(rematchBody.match_source, "deepseek");
+  const after = await (await call(db, `/api/demands/${demandId}/match`, { token })).json();
+  assert.equal(after.match_source, "deepseek");
+  assert.equal(after.match_report.matched_alumni.length, 1);
+  assert.equal(after.match_report.matched_alumni[0].target_id, 8);
+  assert.equal(after.match_report.matched_alumni[0].match_score, 77);
+  assert.equal(after.match_report.matched_alumni[0].ai_reason, "重配后的理由");
+});
+
 test("admin password reset is one-time and blocks other users", async () => {
   const db = await seed();
   const anon = await call(db, "/api/admin/reset-password", { method: "POST", body: { user_id: 3 } });
