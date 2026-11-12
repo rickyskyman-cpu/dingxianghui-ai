@@ -164,10 +164,12 @@ function showRegister() {
 function updateHeaderUserStatus() {
   const pill = document.getElementById("header-user-status");
   const logout = document.getElementById("logout-btn");
+  const auth = document.getElementById("nav-auth");
   const feed = document.getElementById("nav-feed");
   const workspace = document.getElementById("nav-workspace");
   const admin = document.getElementById("nav-admin");
   const approved = isApproved(currentUser);
+  if (auth) auth.hidden = true;
   if (feed) feed.hidden = !approved;
   if (workspace) workspace.hidden = !currentUser;
   if (admin) admin.hidden = !isRealAdmin(currentUser);
