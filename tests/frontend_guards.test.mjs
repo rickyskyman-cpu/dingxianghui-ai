@@ -23,6 +23,12 @@ test("public page does not offer the old demo entry", () => {
   assert.match(html, /favicon\.ico/);
   assert.doesNotMatch(html, /dx-brandmark"[^>]*>丁</);
   assert.doesNotMatch(html, /brand-wordmark/);
+  const header = html.slice(html.indexOf('class="dx-header"'), html.indexOf("</header>"));
+  assert.match(header, /id="nav-auth"[^>]*\bhidden\b/);
+  assert.match(html, /class="entry"[\s\S]*?>登录<\/button>[\s\S]*?>注册<\/button>/);
+  assert.match(html, /id="nav-feed"[^>]*hidden[^>]*>供需/);
+  assert.match(html, /id="nav-workspace"[^>]*hidden[^>]*>能力与需求/);
+  assert.match(html, /id="logout-btn"[^>]*hidden[^>]*>退出/);
   assert.doesNotMatch(html, /toggleVoiceRecording|SpeechRecognition|getUserMedia/);
   assert.doesNotMatch(html, /\.jpg/);
   assert.equal(html.includes("官方校徽"), false);
