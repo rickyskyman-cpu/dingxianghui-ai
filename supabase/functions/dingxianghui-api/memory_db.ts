@@ -147,6 +147,13 @@ export class MemoryDb implements Db {
     this.matches.push(match);
     return clone(match);
   }
+  async matchesByDemand(demandId: number) {
+    return clone(this.matches.filter((m) => m.demand_id === demandId).sort((a, b) => (b.match_score || 0) - (a.match_score || 0) || a.id - b.id));
+  }
+  async replaceDemandMatches(demandId: number, rows: Row[]) {
+    this.matches = this.matches.filter((m) => m.demand_id !== demandId);
+    for (const row of rows) await this.insertMatch({ ...row, demand_id: demandId });
+  }
   async demandById(id: number) {
     return clone(this.demands.find((d) => d.id === id) || null);
   }

@@ -321,15 +321,78 @@ async function createDemand(db: Db, env: Record<string, string | undefined>, fet
   const ai = await rankWithAi(db, env, fetchImpl, u, { ...d, id: saved.id }, users, all);
   const report = ai?.report || fallback;
   const source = ai ? "deepseek" : "规则匹配";
-  for (const m of report.matched_alumni.slice(0, 3)) {
-    await db.insertMatch({
-      demand_id: saved.id, request_user_id: u.id, target_type: "alumni", target_id: m.target_id, match_score: m.match_score,
-      ai_reason: m.ai_reason, complementarity: m.complementarity, suggested_action: m.suggested_action,
-      intent_status: "AI已推荐", broker_assisted: broker, voluntary_pledge: pledge, created_at: ts,
-      match_source: source, model_name: ai?.model || null, prompt_version: ai ? PROMPT_VERSION : null,
-    });
-  }
-  return { message: `项目需求【${code}】已发布，匹配已完成（${source}）。`, demand: demandOut(saved, { [u.id]: u }), match_report: report, match_source: source };
+  await saveMatchReport(db, saved.id, u.id, report, source, ai?.model || null, broker, pledge, ts);
+  return { message: `项目需求【${code}】已发布，匹配已完成（${source}）。`, demand: demandOut(saved, { [u.id]: u }), match_report: attachReportMeta(report, source, ai?.model || null, ts), match_source: source, model_name: ai?.model || null, created_at: ts };
+}
+
+function isStoredReportRow(row: Any) {
+  if (row.match_source) return true;
+  if (row.target_type && row.target_type !== "alumni") return false;
+  const reason = String(row.ai_reason || "");
+  return !!reason && reason !== "校友主动发起精准对接";
+}
+
+function attachReportMeta(report: Any, source: string, model: string | null, createdAt: string | null) {
+  const isAi = /deepseek/i.test(String(source));
+  const match_source = isAi ? "deepseek" : "规则匹配";
+  return {
+    ...report,
+    match_source,
+    model_name: model || null,
+    created_at: createdAt || null,
+    summary_headline: report.summary_headline || (isAi ? "DeepSeek 匹配" : "规则匹配"),
+  };
+}
+
+async function saveMatchReport(db: Db, demandId: number, userId: number, report: Any, source: string, model: string | null, broker: number, pledge: string, ts: string) {
+  const rows = (report.matched_alumni || []).slice(0, 3).map((m: Any) => ({
+    demand_id: demandId, request_user_id: userId, target_type: "alumni", target_id: m.target_id, match_score: m.match_score,
+    ai_reason: m.ai_reason, complementarity: m.complementarity, suggested_action: m.suggested_action,
+    intent_status: "AI已推荐", broker_assisted: broker, voluntary_pledge: pledge, created_at: ts,
+    match_source: source, model_name: model, prompt_version: /deepseek/i.test(String(source)) ? PROMPT_VERSION : null,
+  }));
+  await db.replaceDemandMatches(demandId, rows);
+}
+
+function reportFromStoredMatches(rows: Any[], users: Any[]) {
+  const lookup = Object.fromEntries(users.map((x) => [x.id, x]));
+  const sourceRaw = rows.find((r) => r.match_source)?.match_source || "规则匹配";
+  const isAi = /deepseek/i.test(String(sourceRaw));
+  const source = isAi ? "deepseek" : "规则匹配";
+  const model = rows.find((r) => r.model_name)?.model_name || null;
+  const createdAt = rows[0]?.created_at || null;
+  const alumni = rows.filter(isStoredReportRow).map((m) => {
+    const person = lookup[m.target_id];
+    return {
+      target_type: "alumni",
+      target_id: m.target_id,
+      match_score: m.match_score,
+      ai_reason: m.ai_reason,
+      complementarity: m.complementarity,
+      suggested_action: m.suggested_action,
+      masked_name: person ? `${maskPerson(person.real_name)} · ${person.enroll_year || ""}`.trim() : `校友#${m.target_id}`,
+      masked_company: person ? maskCompany(person.company, person.city) : "",
+      city: person?.city || "",
+      campus: person?.campus || "",
+      position: person?.position || "",
+      core_capabilities: person?.core_capabilities || "",
+      industry_tags: J(person?.industry_tags),
+      can_provide_types: J(person?.can_provide_types),
+      is_demo: !!person?.is_demo,
+      model_name: m.model_name || model,
+      match_source: source,
+      created_at: m.created_at || createdAt,
+    };
+  });
+  const best = alumni.length ? alumni[0].match_score : 0;
+  const report = attachReportMeta({
+    best_match_score: best,
+    summary_headline: isAi ? "DeepSeek 匹配" : "规则匹配",
+    strategy_advice: isAi ? "排序只使用编号和能力摘要，没有发送手机号或校友卡。分数用于排序参考，不是认证或官方推荐。" : "分数用于排序参考，不是认证或官方推荐。",
+    matched_alumni: alumni,
+    matched_demands: [],
+  }, source, model, createdAt);
+  return { match_report: report, match_source: source, model_name: model, created_at: createdAt };
 }
 
 async function demandMatch(db: Db, u: Any, env: Record<string, string | undefined>, id: number) {
@@ -349,7 +412,10 @@ async function demandMatch(db: Db, u: Any, env: Record<string, string | undefine
   }
   const lookup = Object.fromEntries(users.map((x) => [x.id, x]));
   const d = demandOut(row, lookup);
-  return { demand: d, match_report: runMatching(d, users, all) };
+  const stored = (await db.matchesByDemand(id)).filter(isStoredReportRow);
+  if (stored.length) return { demand: d, ...reportFromStoredMatches(stored, users) };
+  const report = attachReportMeta(runMatching(d, users, all), "规则匹配", null, null);
+  return { demand: d, match_report: report, match_source: "规则匹配", model_name: null, created_at: null };
 }
 
 async function matchIntent(db: Db, u: Any, body: Any) {
@@ -722,8 +788,10 @@ export async function handle(req: Request, ctx: { db: Db; env?: Record<string, s
         all = all.filter((x) => x.is_demo);
       }
       const ai = await rankWithAi(db, env, fetchImpl, user, row, users, all);
-      const report = ai?.report || runMatching(row, users, all);
-      data = { match_source: ai ? "deepseek" : "规则匹配", match_report: report };
+      const source = ai ? "deepseek" : "规则匹配";
+      const report = attachReportMeta(ai?.report || runMatching(row, users, all), source, ai?.model || null, now());
+      await saveMatchReport(db, row.id, user.id, report, source, ai?.model || null, Number(row.need_manual_broker) || 0, row.voluntary_pledge || "", report.created_at);
+      data = { match_source: source, match_report: report, model_name: ai?.model || null, created_at: report.created_at };
     }
     else if (M === "GET" && path.match(/^\/api\/demands\/(\d+)\/match$/)) {
       data = await demandMatch(db, await authUser(req, db, env), env, Number(path.match(/^\/api\/demands\/(\d+)\/match$/)![1]));

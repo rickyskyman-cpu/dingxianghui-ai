@@ -28,6 +28,8 @@ export interface Db {
   nextDemandId(): Promise<number>;
   insertDemand(row: Row): Promise<Row>;
   insertMatch(row: Row): Promise<Row>;
+  matchesByDemand(demandId: number): Promise<Row[]>;
+  replaceDemandMatches(demandId: number, rows: Row[]): Promise<void>;
   demandById(id: number): Promise<Row | null>;
   updateIntent(demandId: number, targetId: number, userId: number, status: string, broker: number, pledge: string): Promise<boolean>;
   adminUsers(demoOnly: boolean): Promise<Row[]>;
