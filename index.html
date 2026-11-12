@@ -4,17 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>丁香会-哈工大创业校友联合会</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%23152e48%27/%3E%3Cpath d=%27M8 9h16v15H8zM12 13h8v7h-8z%27 fill=%27none%27 stroke=%27%23f7f6f1%27 stroke-width=%272%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="design/tokens.css" />
   <link rel="stylesheet" href="design/components.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <a class="skip" href="#main">跳到内容</a>
+  <a class="dx-skip" href="#main">跳至主要内容</a>
   <p class="dx-disclaimer">校友自发交流平台，不是哈尔滨工业大学的官方网站，也不使用学校标志。</p>
-  <header class="topbar">
-    <div class="dx-container topbar-inner">
-      <button class="dx-brand" id="nav-home" type="button" onclick="switchView('home')">丁香会<small>丁香会-哈工大创业校友联合会</small></button>
-      <nav class="topnav" aria-label="页面">
+  <div class="dx-container">
+    <header class="dx-header">
+      <button class="dx-brand-lockup" id="nav-home" type="button" onclick="switchView('home')">
+        <span class="dx-brandmark" aria-hidden="true">丁</span>
+        <span class="dx-brand">丁香会<small>丁香会-哈工大创业校友联合会</small></span>
+      </button>
+      <nav class="dx-nav" aria-label="页面">
         <button class="nav-btn" id="nav-auth" type="button" onclick="switchView('auth')">登录</button>
         <button class="nav-btn" id="nav-feed" type="button" onclick="switchView('feed')" hidden>供需</button>
         <button class="nav-btn" id="nav-workspace" type="button" onclick="switchView('workspace')" hidden>能力与需求</button>
@@ -22,8 +26,8 @@
       </nav>
       <div class="session" id="header-user-status"></div>
       <button class="dx-button dx-button--text" id="logout-btn" type="button" hidden onclick="logoutCurrentUser()">退出</button>
-    </div>
-  </header>
+    </header>
+  </div>
   <main id="main" class="main-container">
     <section class="view-section active" id="view-home">
       <div class="dx-blueprint">
@@ -37,487 +41,356 @@
               <button class="dx-button dx-button--secondary" type="button" onclick="showRegister()">注册</button>
             </div>
           </div>
-          <figure class="schematic">
-            <img src="assets/dx/three-campuses.svg" alt="哈尔滨、威海、深圳三个节点的工程线稿，不是实景建筑，也不是官方标志" />
-            <figcaption>线稿表示三个校区之间的联系，不是地图，也不是校徽。</figcaption>
+          <figure class="schematic dx-hero-figure" id="campus-orbital">
+            <img src="assets/dx/hero-orbital.svg" width="480" height="310" alt="航天轨道力学示意：霍曼转移与开普勒等面积扇形。哈尔滨、威海、深圳为三个轨道节点。示意图，非实际地图，不含真实卫星型号。" />
+            <figcaption>线稿表示三个校区之间的轨道联系，不是地图，也不是校徽。</figcaption>
           </figure>
         </div>
       </div>
-      <div class="dx-container drawing-row" aria-hidden="true">
-        <img src="assets/dx/engineering-lines.svg" alt="" />
-      </div>
+      <div class="dx-decor-band" aria-hidden="true"><img src="assets/dx/texture-orbital.svg" alt="" /></div>
     </section>
-    <section class="view-section" id="view-feed"><div class="app-wrap">
-        <p id="internal-overview" class="quiet-line"></p>
-      <div class="panel-card">
-        <div class="panel-header"><div>
-          <h3 class="panel-title">供需检索</h3>
-          <div style="font-size:13px;color:var(--text-muted);">仅对实名审核通过的校友开放。只展示标题、领域与摘要，联系方式需通过“双向匿名确认 / 中心节点撮合”获取。</div>
-        </div></div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <input id="feed-search-kw" class="form-input" style="flex:2;min-width:200px;" placeholder="关键词：如 伺服、碳纤维、储能、出海…" onkeydown="if(event.key==='Enter')runFeedSearch()">
-          <select id="feed-search-industry" class="form-input" style="flex:1;min-width:140px;"><option value="">全部领域</option></select>
-          <select id="feed-search-type" class="form-input" style="flex:1;min-width:120px;"><option value="">供给+需求</option><option value="供给">只看供给</option><option value="需求">只看需求</option></select>
-          <button class="btn btn-primary" onclick="runFeedSearch()">搜索</button>
-        </div>
-        <div id="feed-search-results" style="margin-top:14px;"></div>
-      </div>
-      <div class="panel-card" style="margin-top:20px;">
-        <div class="panel-header"><div>
-          <h3 class="panel-title">🧭 与我相关领域的校友供需</h3>
-          <div id="feed-my-fields" style="font-size:13px;color:var(--text-muted);"></div>
-        </div></div>
-        <div id="feed-posts"></div>
-      </div>
-      <div class="panel-card" style="margin-top:20px;">
-        <div class="panel-header"><div><h3 class="panel-title">🤝 相关领域校友能力（供给方）</h3></div></div>
-        <div id="feed-alumni"></div>
-      </div>
-    </div></section>
-
-    <section class="view-section" id="view-auth"><div class="app-wrap">
-      <div class="two-col-layout">
-        <!-- 左栏：实名认证注册表单 -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">注册</div>
-              <div class="panel-subtitle">
-                填写身份和校友卡编号。提交后等待人工审核，通过前不能查看供需。
+    <section class="view-section" id="view-feed">
+      <div class="dx-container">
+        <header class="dx-page-head">
+          <h1>供需检索</h1>
+          <p class="dx-muted" id="internal-overview">仅对实名审核通过的校友开放。只展示标题、领域与摘要，联系方式需通过双向匿名确认或中心节点撮合获取。</p>
+          <p id="feed-my-fields" class="dx-help"></p>
+        </header>
+        <div class="dx-match-layout">
+          <aside class="dx-filter-panel">
+            <form onsubmit="event.preventDefault();runFeedSearch()">
+              <div class="dx-field">
+                <label for="feed-search-kw">关键词</label>
+                <input id="feed-search-kw" class="dx-input" placeholder="如 伺服、碳纤维、储能、出海" onkeydown="if(event.key==='Enter')runFeedSearch()">
               </div>
-            </div>
-            <span class="badge">人工审核</span>
-          </div>
-
-          <form id="register-form" onsubmit="handleRegisterSubmit(event)">
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">真实姓名 *</label>
-                <input type="text" id="reg-name" class="form-input" placeholder="如：李明轩" required />
+              <div class="dx-field">
+                <label for="feed-search-industry">领域</label>
+                <select id="feed-search-industry" class="dx-select"><option value="">全部领域</option></select>
               </div>
-              <div class="form-group">
-                <label class="form-label">手机号码（登录账号）*</label>
-                <input type="text" id="reg-phone" class="form-input" placeholder="如：13900008888" required />
-              </div>
-            </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">就读/毕业校区 *</label>
-                <select id="reg-campus" class="form-select">
-                  <option value="校本部(哈尔滨)">校本部(哈尔滨)</option>
-                  <option value="深圳校区">深圳校区</option>
-                  <option value="威海校区">威海校区</option>
+              <div class="dx-field">
+                <label for="feed-search-type">类型</label>
+                <select id="feed-search-type" class="dx-select">
+                  <option value="">供给+需求</option>
+                  <option value="供给">只看供给</option>
+                  <option value="需求">只看需求</option>
                 </select>
               </div>
-              <div class="form-group">
-                <label class="form-label">入学级届 *</label>
-                <input type="text" id="reg-year" class="form-input" placeholder="如：2010级" value="2012级" required />
+              <div class="dx-action-bar">
+                <button class="dx-button" type="button" onclick="runFeedSearch()">搜索</button>
               </div>
-            </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">院系及专业 *</label>
-                <input type="text" id="reg-dept" class="form-input" placeholder="如：航天学院 · 飞行器控制" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">常驻城市 *</label>
-                <input type="text" id="reg-city" class="form-input" placeholder="如：深圳 / 哈尔滨 / 苏州" required />
-              </div>
-            </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">所在企业全称 *</label>
-                <input type="text" id="reg-company" class="form-input" placeholder="如：深圳某智能装备科技有限公司" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">担任职务 *</label>
-                <input type="text" id="reg-position" class="form-input" placeholder="如：创始人 & CEO / 研发总监" required />
-              </div>
-            </div>
-
-            <!-- 学校官方平台电子校友卡核验区 -->
-            <div style="border:1px solid var(--line); padding:14px 16px; margin-bottom:14px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-                <label class="form-label" style="margin-bottom:0; color:var(--hit-navy);">
-                  校友卡编号。自动识别未启用，图片不会上传。
-                </label>
-                <span class="quiet-line">只接受 JPG、PNG、WebP，最大 5MB。自动识别未启用，图片不会上传。</span>
-              </div>
-              <div class="form-grid-2">
-                <div class="form-group" style="margin-bottom:6px;">
-                  <input
-                    type="text"
-                    id="reg-card-no"
-                    class="form-input"
-                    placeholder="官方校友卡编号（如 HIT-2012-086521）"
-                    required
-                  />
-                </div>
-                <div class="form-group" style="margin-bottom:6px;">
-                  <input
-                    type="file"
-                    id="reg-card-file"
-                    class="form-input"
-                    accept="image/jpeg,image/png,image/webp" onchange="onAlumniCardSelected()"
-                  />
-                </div>
-              </div>
-              <div id="ocr-result-box" style="font-size:12.5px; color:var(--success); display:none; margin-top:6px;"></div>
-            </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">丁香会引流来源群 / 推荐校友 *</label>
-                <input
-                  type="text"
-                  id="reg-referrer"
-                  class="form-input"
-                  placeholder="如：丁香会大湾区创业群 · 张振宇推荐"
-                  value="丁香会硬科技创业核心群"
-                  required
-                />
-              </div>
-              <div class="form-group">
-                <label class="form-label">设置登录密码 *</label>
-                <input type="password" id="reg-pwd" class="form-input" minlength="8" placeholder="至少8位" autocomplete="new-password" required />
-              </div>
-            </div>
-
-            <div style="display:flex; gap:12px; align-items:center; margin-top:8px;">
-              <button type="submit" class="btn btn-primary">提交注册</button>
-            </div>
-          </form>
-        </div>
-
-        <!-- 右栏：账号登录 + 4个预置测试身份快捷入口 -->
-        <div>
-          <div class="panel-card" style="margin-bottom:20px;">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">登录</div>
-                <div class="panel-subtitle">使用手机号和密码。审核通过后才能进入供需。</div>
-              </div>
-            </div>
-            <form onsubmit="handleLoginSubmit(event)">
-              <div class="form-group">
-                <label class="form-label">手机号码</label>
-                <input type="text" id="login-phone" class="form-input" inputmode="numeric" autocomplete="username" placeholder="注册时填写的手机号" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">登录密码</label>
-                <input type="password" id="login-pwd" class="form-input" autocomplete="current-password" required />
-              </div>
-              <button type="submit" class="btn btn-primary" style="width:100%;">登录</button>
             </form>
-          </div>
-
-        </div>
-      </div>
-          <p class="quiet-line channel-box" id="channel-status">微信扫码、微信内授权和短信都未启用。同时绑定也不等于每次登录都要再验一次，也不是严格双因子。</p>
-          <button class="dx-button dx-button--secondary" type="button" id="open-channel-dialog" onclick="document.getElementById('channel-dialog').showModal()">查看渠道说明</button>
-    </div></section>
-
-    <section class="view-section" id="view-workspace"><div class="app-wrap">
-      <!-- 状态1：未登录提示 -->
-      <div id="ws-unauth-box" class="panel-card" style="display:none; text-align:center; padding:48px 24px;">
-        <h2 style="color:var(--hit-navy); margin-bottom:10px;">🔒 请先登录</h2>
-        <p style="color:var(--text-secondary); max-width:580px; margin:0 auto 20px;">
-          丁香会-AI时代实行严格的校友实名准入机制。请先完成校友实名注册登录，审核通过之前，看不到供需和检索。
-        </p>
-        <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
-          <button class="btn btn-primary" onclick="switchView('auth')">前往校友实名注册 / 登录</button>
-        </div>
-      </div>
-
-      <!-- 状态2：待平台审核拦截页 (`audit_status !== 'approved'`) -->
-      <div id="ws-pending-box" class="panel-card" style="display:none; border-top:4px solid var(--warning);">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+          </aside>
           <div>
-            <span class="badge badge-warning" style="font-size:13px; padding:5px 12px; margin-bottom:10px;">
-              ⏳ 平台实名与校友卡审核拦截中
-            </span>
-            <h2 style="color:var(--hit-navy); margin-bottom:8px;">
-              您的校友实名认证与官方电子校友卡正在等待平台审核
-            </h2>
-            <p style="color:var(--text-secondary); max-width:760px;">
-              根据丁香会-AI时代平台规则，所有注册校友须先通过<strong>学校官方平台校友卡凭证核验</strong>。审核通过后，您将依次解锁<strong>【第一步：完善个人与企业能力介绍】</strong>与<strong>【第二步：语音提交项目合作需求及AI智能匹配】</strong>。
-            </p>
-          </div>
-          <div>
+            <div id="feed-search-results" role="status"></div>
+            <div id="feed-posts"></div>
+            <h2 class="dx-page-head" style="padding-top:24px">相关领域校友能力</h2>
+            <div id="feed-alumni"></div>
           </div>
         </div>
-
-        <div id="ws-pending-user-summary" style="background:#f8fafc; border:1px solid var(--border-color); border-radius:10px; padding:16px 20px; margin-top:18px;"></div>
       </div>
-
-      <!-- 状态3：已通过审核的工作台主体 -->
-      <div id="ws-approved-container" style="display:none;">
-        <!-- 当前校友身份横幅 -->
-        <div class="panel-card" style="margin-bottom:18px; background:linear-gradient(90deg, #0b2246 0%, #1d3f75 100%); color:#fff;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-            <div id="ws-user-banner-info"></div>
-            <div style="display:flex; gap:10px; align-items:center;" id="ws-user-banner-badges"></div>
-          </div>
-        </div>
-
-        <!-- 3步流程解锁导航条 -->
-        <div class="stepper-bar">
-          <div class="step-tab active" id="step-tab-1" onclick="selectWorkspaceStep(1)">
-            <div class="step-tab-left">
-              <div class="step-circle">1</div>
-              <div>
-                <div style="font-weight:800; color:var(--hit-navy);">第一步：完善个人与企业情况介绍</div>
-                <div style="font-size:12px; color:var(--text-muted);">原则上须先介绍清楚自身情况与能力（支持语音）</div>
+    </section>
+    <section class="view-section" id="view-auth">
+      <div class="dx-container">
+        <div class="dx-auth">
+          <aside class="dx-auth__intro">
+            <div class="dx-eyebrow">ENGINEER CONNECTIONS. BUILD TOGETHER.</div>
+            <h1>汇聚资源，<br><em>共创未来。</em></h1>
+            <p class="dx-muted">哈工大校友自发交流的地方。公开页面只展示品牌与注册入口；供需、检索与匹配在审核通过后开放。</p>
+            <div class="dx-auth__band"><img src="assets/dx/texture-orbital.svg" alt=""></div>
+          </aside>
+          <div class="dx-auth__panel">
+            <div class="dx-form-card" id="auth-login">
+              <div class="dx-form-card__head">
+                <h2>登录</h2>
+                <span class="dx-help">使用注册时的手机号和密码</span>
               </div>
-            </div>
-            <span class="badge badge-warning" id="step1-status-badge">待完善</span>
-          </div>
-
-          <div class="step-tab" id="step-tab-2" onclick="selectWorkspaceStep(2)">
-            <div class="step-tab-left">
-              <div class="step-circle">2</div>
-              <div>
-                <div style="font-weight:800; color:var(--hit-navy);">第二步：提交项目合作需求（语音+AI）</div>
-                <div style="font-size:12px; color:var(--text-muted);">语音直说需求 · 后台AI自动转文字并提炼卡片</div>
-              </div>
-            </div>
-            <span class="badge badge-navy" id="step2-status-badge">🔒 需先完成第一步</span>
-          </div>
-
-          <div class="step-tab" id="step-tab-3" onclick="selectWorkspaceStep(3)">
-            <div class="step-tab-left">
-              <div class="step-circle">3</div>
-              <div>
-                <div style="font-weight:800; color:var(--hit-navy);">第三步：AI全库智能匹配与对接</div>
-                <div style="font-size:12px; color:var(--text-muted);">匹配系统内校友能力与商机 · 双向确认/人工撮合</div>
-              </div>
-            </div>
-            <span class="badge badge-lilac" id="step3-status-badge">实时生成</span>
-          </div>
-        </div>
-
-        <!-- 拦截警告提示框（当未填个人情况却点击第二步时弹出） -->
-        <div
-          id="profile-gate-alert"
-          style="display:none; background:#fffbeb; border:2px solid #f59e0b; color:#92400e; padding:14px 18px; border-radius:10px; margin-bottom:18px; font-weight:600;"
-        >
-          ⚠️ 平台规则拦截：原则上要求注册校友<strong>先把自己的个人与企业情况及核心能力介绍清楚</strong>，保存通过后才能向系统提交项目需求信息！请先在下方完成第一步保存。
-        </div>
-
-        <!-- ========== SUB-PANEL 1: 完善个人与企业情况及能力介绍 ========== -->
-        <div id="ws-step-1-panel" class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">📋 第一步：个人与企业情况及核心能力画像（提需求前置必填）</div>
-              <div class="panel-subtitle">
-                原则上要求注册校友先把自己的情况介绍清楚，这样您的能力既能进入全库供其他校友AI匹配，也能为您解锁【提交项目合作需求】权限。
-              </div>
-            </div>
-            <span class="badge badge-gold">支持语音直接录入 + AI自动提取</span>
-          </div>
-
-          <!-- 个人能力语音录入控制台 -->
-          <div class="voice-console-box">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong style="font-size:15px; color:#f6e05e;">🎙️ 语音直接介绍个人与企业情况（后台AI自动转文字并提炼能力字段）</strong>
-                <div style="font-size:12.5px; color:#cbd5e1;">
-                  您可以直接点击麦克风口述自己的届别、企业业务与核心能力，或点击右侧预设的校友语音示例立即体验后台AI解析：
+              <div class="dx-form-alert" id="login-error" hidden role="alert"></div>
+              <form id="login-form" onsubmit="handleLoginSubmit(event)" novalidate>
+                <div class="dx-field">
+                  <label for="login-phone">手机号码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" id="login-phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="username" required placeholder="11位中国大陆手机号" aria-describedby="login-phone-help login-error">
+                  <span class="dx-help" id="login-phone-help">登录账号为注册时填写的手机号。</span>
                 </div>
+                <div class="dx-field">
+                  <label for="login-pwd">密码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" id="login-pwd" type="password" autocomplete="current-password" required minlength="8">
+                </div>
+                <div class="dx-action-bar">
+                  <button class="dx-button dx-button--text" type="button" onclick="showAuthMode('register')">没有账号？去注册</button>
+                  <button class="dx-button" type="submit" id="login-submit">登录</button>
+                </div>
+              </form>
+              <div class="alt-login" id="alt-login">
+                <h3>其他登录方式</h3>
+                <p id="sms-login-note" class="dx-help">短信验证码登录：暂未开通</p>
+                <button type="button" class="dx-button dx-button--secondary" id="sms-login-disabled" disabled>短信登录暂未开通</button>
+                <form id="sms-login-form" hidden onsubmit="handleSmsLogin(event)">
+                  <div class="dx-field">
+                    <label for="sms-phone">注册手机号</label>
+                    <input id="sms-phone" class="dx-input" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="11位手机号" aria-describedby="sms-phone-error">
+                    <p id="sms-phone-error" class="dx-error" hidden></p>
+                  </div>
+                  <div class="dx-action-bar">
+                    <button class="dx-button dx-button--secondary" type="button" id="sms-send">获取验证码</button>
+                  </div>
+                  <div class="dx-field">
+                    <label for="sms-code">验证码</label>
+                    <input id="sms-code" class="dx-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6位验证码">
+                  </div>
+                  <button class="dx-button" type="submit" id="sms-submit">用验证码登录</button>
+                </form>
+                <p id="wechat-login-note" class="dx-help">微信扫码登录：暂未开通</p>
+                <button type="button" class="dx-button dx-button--secondary" id="wechat-login-disabled" disabled>微信登录暂未开通</button>
+                <p id="wechat-login-link" hidden></p>
               </div>
-              <span class="badge badge-gold" id="profile-voice-status">AI语音引擎就绪</span>
+              <p class="dx-help" id="channel-status">微信扫码和短信验证码都未启用。未配置时不能当作已启用的两步验证。</p>
+              <button class="dx-button dx-button--text" type="button" id="open-channel-dialog" onclick="document.getElementById('channel-dialog').showModal()">查看渠道说明</button>
             </div>
 
-            <div class="voice-controls-row">
-              <button type="button" class="mic-record-btn" id="profile-mic-btn" onclick="toggleVoiceRecording('profile')">
-                🎙️ 点击开始麦克风录音介绍
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('profile', 'profile_sample_1')">
-                🔊 语音示例A：14级深圳计算机·工业3D视觉校友自述
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('profile', 'profile_sample_2')">
-                🔊 语音示例B：16级材料学院·碳纤维新材料校友自述
-              </button>
-            </div>
-
-            <div>
-              <textarea
-                id="profile-voice-raw"
-                class="form-textarea"
-                style="min-height:66px; background:rgba(255,255,255,0.95);"
-                placeholder="语音识别转写的文字内容将显示在这里（您也可以直接在此粘贴或输入一段口语自我介绍，然后点击下方【AI提取填充个人能力表单】）..."
-              ></textarea>
-              <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                <button type="button" class="btn btn-sm btn-gold" onclick="parseProfileFromTextarea()">
-                  ✨ 用后台AI将上方口述内容转换为结构化能力画像
-                </button>
+            <div class="dx-form-card" id="auth-register" hidden>
+              <div class="dx-form-card__head">
+                <h2>注册</h2>
+                <span class="dx-help">提交后等待人工审核，通过前不能查看供需</span>
               </div>
+              <div class="dx-form-alert" id="register-error" hidden role="alert"></div>
+              <form id="register-form" onsubmit="handleRegisterSubmit(event)" novalidate>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="reg-name">真实姓名<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="text" id="reg-name" maxlength="30" required autocomplete="name">
+                  </div>
+                  <div class="dx-field">
+                    <label for="reg-phone">手机号码（登录账号）<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" id="reg-phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" required aria-describedby="reg-phone-help">
+                    <span class="dx-help" id="reg-phone-help">11 位中国大陆手机号，将作为登录账号。</span>
+                  </div>
+                </div>
+                <fieldset class="dx-field-group">
+                  <legend class="dx-field-group__legend">就读/毕业校区<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></legend>
+                  <div class="dx-choice-list dx-choice-list--row">
+                    <label class="dx-radio"><input type="radio" name="reg-campus-choice" value="校本部(哈尔滨)" checked onchange="document.getElementById('reg-campus').value=this.value"> 哈尔滨</label>
+                    <label class="dx-radio"><input type="radio" name="reg-campus-choice" value="威海校区" onchange="document.getElementById('reg-campus').value=this.value"> 威海</label>
+                    <label class="dx-radio"><input type="radio" name="reg-campus-choice" value="深圳校区" onchange="document.getElementById('reg-campus').value=this.value"> 深圳</label>
+                  </div>
+                  <select id="reg-campus" class="dx-select" hidden>
+                    <option value="校本部(哈尔滨)" selected>校本部(哈尔滨)</option>
+                    <option value="威海校区">威海校区</option>
+                    <option value="深圳校区">深圳校区</option>
+                  </select>
+                </fieldset>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="reg-year">入学级届<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="text" id="reg-year" required placeholder="如：2010级">
+                  </div>
+                  <div class="dx-field">
+                    <label for="reg-dept">院系及专业<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="text" id="reg-dept" required>
+                  </div>
+                </div>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="reg-city">常驻城市<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="text" id="reg-city" required>
+                  </div>
+                  <div class="dx-field">
+                    <label for="reg-company">所在企业<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="text" id="reg-company" required>
+                  </div>
+                </div>
+                <div class="dx-field">
+                  <label for="reg-position">职务<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="reg-position" required>
+                </div>
+                <div class="dx-field">
+                  <label for="reg-card-no">学校官方平台校友卡编号<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="reg-card-no" required aria-describedby="reg-card-help">
+                  <span class="dx-help" id="reg-card-help">用于人工核验。当前不会上传证件影像，选择文件仅作本地提示。</span>
+                  <div class="dx-dropzone" id="reg-card-drop">
+                    <input type="file" id="reg-card-file" accept="image/jpeg,image/png,image/webp" onchange="onAlumniCardSelected()">
+                    <p>可将校友卡图片拖放到此处，或选择文件（可选，不会上传到存储）。</p>
+                  </div>
+                  <div id="ocr-result-box" class="dx-help" hidden></div>
+                </div>
+                <div class="dx-field">
+                  <label for="reg-referrer">引流来源群 / 推荐校友<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="reg-referrer" required>
+                </div>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="reg-pwd">设置登录密码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="password" id="reg-pwd" maxlength="72" minlength="8" autocomplete="new-password" required aria-describedby="reg-pwd-help">
+                    <span class="dx-help" id="reg-pwd-help">8 到 72 位。</span>
+                  </div>
+                  <div class="dx-field">
+                    <label for="reg-pwd-confirm">确认密码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="password" id="reg-pwd-confirm" maxlength="72" minlength="8" autocomplete="new-password" required>
+                    <p class="dx-error" id="reg-pwd-confirm-error" hidden></p>
+                  </div>
+                </div>
+                <div class="dx-action-bar">
+                  <button class="dx-button dx-button--text" type="button" onclick="showAuthMode('login')">已有账号？去登录</button>
+                  <button class="dx-button" type="submit" id="register-submit">提交注册申请</button>
+                </div>
+              </form>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+    <section class="view-section" id="view-workspace">
+      <div class="dx-container">
+        <div id="ws-unauth-box" class="dx-form-card" hidden>
+          <div class="dx-state">
+            <h2>请先登录</h2>
+            <p class="dx-muted">请先完成校友实名注册并登录。审核通过之前，看不到供需和检索。</p>
+            <button class="dx-button" type="button" onclick="switchView('auth')">前往登录 / 注册</button>
+          </div>
+        </div>
 
-          <!-- 个人情况结构化表单 -->
-          <form onsubmit="handleSaveProfile(event)">
-            <div class="form-group">
-              <label class="form-label">1. 个人经历与所在企业详细情况介绍 *（不少于20字）</label>
-              <textarea
-                id="prof-bio"
-                class="form-textarea"
-                placeholder="请介绍您的哈工大入学届别院系、创业或从业经历、企业主营产品、团队规模、资质认证及典型客户案例..."
-                required
-              ></textarea>
+        <div id="ws-pending-box" class="dx-form-card" hidden>
+          <div class="dx-pending" id="ws-pending-panel">
+            <p id="ws-pending-badge-wrap"><span class="dx-badge dx-badge--pending">待审核</span></p>
+            <h2 id="ws-pending-title">注册申请正在审核</h2>
+            <p class="dx-muted" id="ws-pending-copy">审核完成前只能看到品牌介绍与本页。通过后即可填写能力档案并查看供需。</p>
+            <div id="ws-pending-user-summary" class="dx-preview"></div>
+            <div class="dx-action-bar">
+              <button class="dx-button dx-button--secondary" type="button" onclick="switchView('home')">返回首页</button>
             </div>
+          </div>
+        </div>
 
-            <div class="form-group">
-              <label class="form-label">2. 核心技术优势与可向校友提供的核心能力 *</label>
-              <input
-                type="text"
-                id="prof-capabilities"
-                class="form-input"
-                placeholder="如：高精度空心杯伺服电机研发与量产、3D线激光视觉检测系统、欧洲光储分销渠道..."
-                required
-              />
+        <div id="password-change-box" class="dx-form-card" hidden>
+          <div class="dx-form-card__head">
+            <h2>修改临时密码</h2>
+            <span class="dx-help">下次登录必须使用新密码</span>
+          </div>
+          <form id="change-password-form" onsubmit="handleChangePassword(event)">
+            <div class="dx-field">
+              <label for="new-password">新密码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+              <input class="dx-input" type="password" id="new-password" minlength="8" maxlength="72" required autocomplete="new-password" aria-describedby="new-password-error">
+              <p class="dx-error" id="new-password-error" hidden></p>
             </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">3. 可提供资源类型（多选，用逗号分隔）*</label>
-                <input
-                  type="text"
-                  id="prof-provide-types"
-                  class="form-input"
-                  placeholder="如：技术研发, 产品/供应链, 市场渠道"
-                  value="技术研发, 产品/供应链"
-                  required
-                />
-              </div>
-              <div class="form-group">
-                <label class="form-label">4. 所属与擅长行业标签（用逗号分隔，用于AI向量匹配）*</label>
-                <input
-                  type="text"
-                  id="prof-industry-tags"
-                  class="form-input"
-                  placeholder="如：工业视觉, 具身智能, 智能制造, 半导体装备"
-                  required
-                />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">5. 期望与校友开展的合作方式 *</label>
-              <input
-                type="text"
-                id="prof-coop-modes"
-                class="form-input"
-                placeholder="如：上下游供应链配套采购、联合技术攻关、产线免费试机、海外渠道共建"
-                required
-              />
-            </div>
-
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:16px;">
-              <span style="font-size:12.5px; color:var(--text-muted);">
-                💡 保存后将自动同步至丁香会校友能力库，并立即解锁【第二步：提交项目合作需求】。
-              </span>
-              <button type="submit" class="btn btn-primary">
-                ✅ 保存个人与企业能力画像，进入下一步提需求 →
-              </button>
+            <div class="dx-action-bar">
+              <button class="dx-button" type="submit" id="change-password-submit">保存新密码</button>
             </div>
           </form>
         </div>
 
-        <!-- ========== SUB-PANEL 2: 提交项目合作需求（语音直接提交 + 后台AI转文字与结构化 + 自动触发AI匹配） ========== -->
-        <div id="ws-step-2-panel" class="panel-card" style="display:none;">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">🎙️ 第二步：提交项目合作需求（支持语音直接提交 · 后台AI自动转换文字与结构化需求）</div>
-              <div class="panel-subtitle">
-                直接口述您的项目合作痛点，后台AI自动将语音转换成文字需求内容并提炼结构化字段，提交后立即在系统全库中进行AI智能匹配。
-              </div>
-            </div>
-            <span class="badge badge-success">已通过个人能力前置校验</span>
-          </div>
+        <div id="ws-approved-container" hidden>
+          <header class="dx-page-head">
+            <h1>能力与需求</h1>
+            <div id="ws-user-banner-info"></div>
+            <div id="ws-user-banner-badges"></div>
+            <div id="wechat-bind-box"></div>
+          </header>
 
-          <!-- 项目需求语音直接录入控制台 -->
-          <div class="voice-console-box">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong style="font-size:15.5px; color:#f6e05e;">
-                  🎙️ 语音直接说需求（Web Speech 实时语音识别 + 录音上传后台 `/api/ai/voice-to-text` 智能解析）
-                </strong>
-                <div style="font-size:12.5px; color:#cbd5e1;">
-                  点击红色麦克风按钮直接说话，或点击下方 3 个真实校友语音示例按钮，观看后台 AI 如何秒级把语音转换成结构化需求卡片：
+          <ol class="dx-stepper" aria-label="能力与需求步骤">
+            <li class="dx-stepper__item dx-stepper__item--current" id="step-tab-1">
+              <button type="button" class="dx-stepper__index" onclick="selectWorkspaceStep(1)">1</button>
+              <div class="dx-stepper__label">个人能力<span id="step1-status-badge" class="dx-badge dx-badge--pending">待完善</span></div>
+            </li>
+            <li class="dx-stepper__item" id="step-tab-2">
+              <button type="button" class="dx-stepper__index" onclick="selectWorkspaceStep(2)">2</button>
+              <div class="dx-stepper__label">提交需求<span id="step2-status-badge" class="dx-badge">待解锁</span></div>
+            </li>
+            <li class="dx-stepper__item" id="step-tab-3">
+              <button type="button" class="dx-stepper__index" onclick="selectWorkspaceStep(3)">3</button>
+              <div class="dx-stepper__label">匹配结果</div>
+            </li>
+          </ol>
+          <div class="dx-form-alert" id="profile-gate-alert" hidden role="alert">请先完善个人与企业情况及核心能力，保存后再提交需求。</div>
+
+          <div id="ws-step-1-panel" class="dx-form-shell">
+            <form id="profile-form" onsubmit="handleSaveProfile(event)">
+              <div class="dx-form-card">
+                <div class="dx-form-card__head"><h2>个人与企业情况</h2></div>
+                <div class="dx-field">
+                  <label for="prof-bio">个人与企业情况介绍<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <textarea class="dx-textarea" id="prof-bio" maxlength="1200" required aria-describedby="prof-bio-help prof-bio-count"></textarea>
+                  <div class="dx-field__meta">
+                    <span class="dx-help" id="prof-bio-help">不少于 20 字，说明自己和企业的情况。</span>
+                    <span class="dx-counter" id="prof-bio-count">0 / 1200</span>
+                  </div>
                 </div>
               </div>
-              <span class="badge badge-gold" id="demand-voice-status">等待语音输入</span>
-            </div>
-
-            <div class="voice-controls-row">
-              <button type="button" class="mic-record-btn" id="demand-mic-btn" onclick="toggleVoiceRecording('demand')">
-                🎙️ 按下开始语音说需求
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('demand', 'demand_sample_1')">
-                🔊 语音示例1：寻找军工级碳纤维复合材料供应商
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('demand', 'demand_sample_2')">
-                🔊 语音示例2：工业视觉检测算法寻求产线落地场景
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('demand', 'demand_sample_3')">
-                🔊 语音示例3：新能源储能项目海外渠道与欧盟合规合作
-              </button>
-            </div>
-
-            <div>
-              <label style="font-size:12px; color:#f6e05e; font-weight:700; display:block; margin-bottom:4px;">
-                📝 后台 AI 语音转文字原始记录（可自由修改补充，点击右侧按钮重新用AI提炼结构）：
-              </label>
-              <textarea
-                id="demand-voice-raw"
-                class="form-textarea"
-                style="min-height:74px; background:rgba(255,255,255,0.96);"
-                placeholder="点击上方麦克风录音或任一【语音示例】按钮，AI转写后的口语文字会呈现在此，并自动填充下方结构化项目需求表单..."
-              ></textarea>
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; flex-wrap:wrap; gap:8px;">
-                <span id="demand-ai-trace" style="font-size:12px; color:#cbd5e1;">
-                  引擎：HIT-DingXiangHui-Voice-NLP-v2.6（支持口语自动转标题/分类/预算/合作画像）
-                </span>
-                <button type="button" class="btn btn-sm btn-gold" onclick="parseDemandFromTextarea()">
-                  🤖 AI重新解析上方文字并填充下方需求卡片
-                </button>
+              <div class="dx-form-card">
+                <div class="dx-form-card__head"><h2>核心能力与合作意向</h2></div>
+                <div class="dx-field">
+                  <label for="prof-capabilities">核心可提供能力<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <textarea class="dx-textarea" id="prof-capabilities" maxlength="600" required aria-describedby="prof-cap-help prof-capabilities-count"></textarea>
+                  <div class="dx-field__meta">
+                    <span class="dx-help" id="prof-cap-help">不少于 8 字，写明可向校友提供的能力。</span>
+                    <span class="dx-counter" id="prof-capabilities-count">0 / 600</span>
+                  </div>
+                </div>
+                <div class="dx-field">
+                  <label for="prof-provide-types">可提供资源类型<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="prof-provide-types" required aria-describedby="prof-provide-help">
+                  <span class="dx-help" id="prof-provide-help">多项请用逗号分隔，例如：技术研发, 产品/供应链, 市场渠道。</span>
+                </div>
+                <div class="dx-field">
+                  <label for="prof-industry-tags">擅长行业标签<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="prof-industry-tags" required aria-describedby="prof-tags-help">
+                  <span class="dx-help" id="prof-tags-help">用于相关领域推荐，多项用逗号分隔。</span>
+                </div>
+                <div class="dx-field">
+                  <label for="prof-coop-modes">期望合作方式<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="prof-coop-modes" required>
+                </div>
               </div>
+              <div class="dx-action-bar dx-action-bar--sticky">
+                <p class="dx-muted">保存后将解锁需求提交。</p>
+                <button class="dx-button" type="submit" id="profile-submit">保存能力档案</button>
+              </div>
+            </form>
+            <div class="dx-form-card" id="password-settings-box">
+              <div class="dx-form-card__head">
+                <h2>账号与安全</h2>
+                <span class="dx-help">修改登录密码需要验证当前密码</span>
+              </div>
+              <form id="settings-password-form" onsubmit="handleSettingsPassword(event)">
+                <div class="dx-field">
+                  <label for="current-password">当前密码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="password" id="current-password" required autocomplete="current-password">
+                </div>
+                <div class="dx-field">
+                  <label for="settings-new-password">新密码<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="password" id="settings-new-password" minlength="8" maxlength="72" required autocomplete="new-password" aria-describedby="settings-password-error">
+                  <p class="dx-help">8 到 72 位。</p>
+                  <p class="dx-error" id="settings-password-error" hidden></p>
+                </div>
+                <div class="dx-action-bar">
+                  <button class="dx-button" type="submit" id="settings-password-submit">更新密码</button>
+                </div>
+              </form>
             </div>
           </div>
 
-          <!-- AI转换后的结构化项目需求表单 -->
-          <form onsubmit="handleCreateDemand(event)">
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">项目合作需求标题 *（AI已根据语音自动提炼，可微调）</label>
-                <input
-                  type="text"
-                  id="dem-title"
-                  class="form-input"
-                  placeholder="如：高机动巡检机器人寻求军工级T800碳纤维复材轻量化外壳定制"
-                  required
-                />
-              </div>
-              <div class="form-group">
-                <label class="form-label">需求合作类别 *</label>
-                <select id="dem-category" class="form-select">
+          <div id="ws-step-2-panel" class="dx-form-shell" hidden>
+            <ol class="dx-stepper" id="demand-substepper" aria-label="需求提交步骤">
+              <li class="dx-stepper__item dx-stepper__item--current" data-demand-step="1"><span class="dx-stepper__index">1</span><span class="dx-stepper__label">类型</span></li>
+              <li class="dx-stepper__item" data-demand-step="2"><span class="dx-stepper__index">2</span><span class="dx-stepper__label">内容</span></li>
+              <li class="dx-stepper__item" data-demand-step="3"><span class="dx-stepper__index">3</span><span class="dx-stepper__label">预览</span></li>
+              <li class="dx-stepper__item" data-demand-step="4"><span class="dx-stepper__index">4</span><span class="dx-stepper__label">确认</span></li>
+            </ol>
+            <form id="demand-form" onsubmit="handleCreateDemand(event)">
+              <div id="demand-pane-1" class="dx-form-card">
+                <div class="dx-form-card__head"><h2>需求类型与领域</h2></div>
+                <div class="dx-field">
+                  <label for="dem-category">需求类别<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+<select id="dem-category" class="dx-select">
                   <option value="找供应链/核心部件">找供应链/核心部件</option>
                   <option value="找技术/联合研发">找技术/联合研发</option>
                   <option value="找客户/市场渠道">找客户/市场渠道</option>
                   <option value="找资金/投融资">找资金/投融资</option>
                   <option value="产能共享/以货易货">产能共享/以货易货</option>
                 </select>
-              </div>
-            </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">所属核心行业 *</label>
-                <select id="dem-industry" class="form-select">
+                </div>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="dem-industry">所属核心行业<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+<select id="dem-industry" class="dx-select">
                   <option value="具身智能">具身智能</option>
                   <option value="航空航天">航空航天</option>
                   <option value="新材料">新材料</option>
@@ -531,166 +404,156 @@
                   <option value="硬科技创投">硬科技创投</option>
                   <option value="节能环保">节能环保</option>
                 </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">项目所在城市 *</label>
-                <input type="text" id="dem-city" class="form-input" value="深圳" required />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">项目需求详细描述与技术/商务指标 *（AI已从语音整理）</label>
-              <textarea
-                id="dem-desc"
-                class="form-textarea"
-                placeholder="详细描述项目背景、具体技术参数要求、交付周期、应用场景等..."
-                required
-              ></textarea>
-            </div>
-
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label class="form-label">预算 / 合作规模区间 *</label>
-                <input
-                  type="text"
-                  id="dem-budget"
-                  class="form-input"
-                  placeholder="如：首年采购预算 200万 - 350万元"
-                  required
-                />
-              </div>
-              <div class="form-group">
-                <label class="form-label">期望对接的校友企业画像 *</label>
-                <input
-                  type="text"
-                  id="dem-partner"
-                  class="form-input"
-                  placeholder="如：具备GJB国军标或航空航天碳纤维复材经验的校友企业"
-                  required
-                />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">AI匹配标签（逗号分隔）*</label>
-              <input
-                type="text"
-                id="dem-tags"
-                class="form-input"
-                placeholder="如：具身智能, 碳纤维, 新材料, 航空航天"
-                required
-              />
-            </div>
-
-            <!-- 中心节点人工撮合 & 自愿回馈共建承诺 -->
-            <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:10px; padding:14px 16px; margin-bottom:16px;">
-              <div class="form-grid-2">
-                <div>
-                  <label style="display:flex; align-items:center; gap:8px; font-weight:700; color:var(--hit-navy); cursor:pointer;">
-                    <input type="checkbox" id="dem-broker" checked style="width:16px; height:16px;" />
-                    <span>🏅 同步申请【丁香会中心节点】人工深度居间撮合介入</span>
-                  </label>
-                  <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
-                    勾选后，除AI自动匹配外，中心节点负责人将协助定向核实校友产能、背书引荐并协助签署居间/保密协议。
+                  </div>
+                  <div class="dx-field">
+                    <label for="dem-city">城市<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                    <input class="dx-input" type="text" id="dem-city" value="深圳" required>
                   </div>
                 </div>
-                <div>
-                  <label class="form-label" style="margin-bottom:4px;">🌸 项目合作成功后自愿回馈平台长期建设意向</label>
-                  <input
-                    type="text"
-                    id="dem-pledge"
-                    class="form-input"
-                    value="项目成交后自愿按首年合作额1%~2%回馈丁香会AI平台长期建设"
-                  />
+              </div>
+              <div id="demand-pane-2" class="dx-form-card" hidden>
+                <div class="dx-form-card__head"><h2>需求内容</h2></div>
+                <div class="dx-field">
+                  <label for="dem-title">需求标题<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <input class="dx-input" type="text" id="dem-title" maxlength="120" required aria-describedby="dem-title-count">
+                  <div class="dx-field__meta"><span class="dx-help">不少于 4 字。</span><span class="dx-counter" id="dem-title-count">0 / 120</span></div>
+                </div>
+                <div class="dx-field">
+                  <label for="dem-desc">需求描述<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+                  <textarea class="dx-textarea" id="dem-desc" maxlength="2000" required aria-describedby="dem-desc-help dem-desc-count"></textarea>
+                  <div class="dx-field__meta"><span class="dx-help" id="dem-desc-help">不少于 10 字，说明背景、目标和期望。</span><span class="dx-counter" id="dem-desc-count">0 / 2000</span></div>
+                </div>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="dem-budget">预算或规模</label>
+                    <input class="dx-input" type="text" id="dem-budget">
+                  </div>
+                  <div class="dx-field">
+                    <label for="dem-partner">期望合作对象</label>
+                    <input class="dx-input" type="text" id="dem-partner">
+                  </div>
+                </div>
+                <div class="dx-field">
+                  <label for="dem-tags">标签</label>
+                  <input class="dx-input" type="text" id="dem-tags" aria-describedby="dem-tags-help">
+                  <span class="dx-help" id="dem-tags-help">多项用逗号分隔，便于匹配相近领域。</span>
+                </div>
+                <label class="dx-check"><input type="checkbox" id="dem-broker"> 需要中心节点人工深度撮合</label>
+                <div class="dx-field">
+                  <label for="dem-pledge">自愿回馈承诺</label>
+                  <input class="dx-input" type="text" id="dem-pledge" value="项目合作成功后自愿回馈平台建设">
                 </div>
               </div>
-            </div>
-
-            <div style="display:flex; justify-content:flex-end; gap:12px;">
-              <button type="submit" class="btn btn-primary" style="font-size:15px; padding:11px 24px;">
-                🚀 提交项目需求，立即启动 AI 全库智能匹配 →
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <!-- ========== SUB-PANEL 3: AI 智能匹配结果报告与双向对接面板 ========== -->
-        <div id="ws-step-3-panel" style="display:none;">
-          <div class="panel-card" style="margin-bottom:20px;">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">🧠 第三步：AI 全库智能匹配分析报告</div>
-                <div class="panel-subtitle">
-                  基于您提交的项目需求，在系统已注册校友能力库与商机池中实时计算多维语义与产业链互补度
+              <div id="demand-pane-3" class="dx-form-card" hidden>
+                <div class="dx-form-card__head"><h2>预览并确认</h2></div>
+                <div class="dx-preview" id="demand-preview"></div>
+              </div>
+              <div id="demand-pane-4" class="dx-success-panel" hidden>
+                <h2>需求已提交</h2>
+                <p id="demand-success-copy" class="dx-muted"></p>
+                <div class="dx-action-bar">
+                  <button class="dx-button" type="button" onclick="selectWorkspaceStep(3, true)">查看匹配结果</button>
                 </div>
               </div>
-              <div style="display:flex; gap:8px; align-items:center;">
-                <span style="font-size:12.5px; color:var(--text-muted);">切换查看已发布需求：</span>
-                <select id="match-demand-selector" class="filter-select" onchange="loadDemandMatchReport(this.value)"></select>
+              <div class="dx-action-bar dx-action-bar--sticky" id="demand-actions">
+                <p class="dx-muted" id="demand-step-label">第 1 步，共 4 步</p>
+                <button class="dx-button dx-button--secondary" type="button" id="demand-prev" hidden onclick="stepDemand(-1)">上一步</button>
+                <button class="dx-button" type="button" id="demand-next" onclick="stepDemand(1)">下一步</button>
+                <button class="dx-button" type="submit" id="demand-submit" hidden>确认提交</button>
               </div>
+            </form>
+          </div>
+
+          <div id="ws-step-3-panel" hidden>
+            <header class="dx-page-head">
+              <h1>匹配结果</h1>
+              <p class="dx-muted">分数用于排序参考，不是认证或官方推荐。匹配来源会标明 DeepSeek 或规则匹配。</p>
+              <div class="dx-field">
+                <label for="match-demand-selector">选择已提交的需求</label>
+                <select id="match-demand-selector" class="dx-select" onchange="loadDemandMatchReport(this.value)"></select>
+              </div>
+            </header>
+            <div id="active-demand-banner" class="dx-form-card"></div>
+            <div id="match-empty" class="dx-state" hidden>
+              <h2>暂无匹配结果</h2>
+              <p class="dx-muted">还没有可展示的匹配，或当前需求下没有候选。请先提交需求，或稍后再试。</p>
             </div>
-
-            <!-- 当前匹配的目标需求摘要 -->
-            <div id="active-demand-banner" style="background:linear-gradient(135deg, #0b2246 0%, #231942 100%); color:#fff; border-radius:11px; padding:18px 22px; margin-bottom:18px;"></div>
-
-            <!-- AI匹配出来的Top校友企业列表 -->
-            <h3 style="font-size:16px; color:var(--hit-navy); margin-bottom:12px;">
-              🎯 AI 精准匹配的哈工大校友企业（按上下游互补度与能力契合度排序）
-            </h3>
             <div id="matched-alumni-container"></div>
-
-            <!-- AI匹配出来的协同商机列表 -->
-            <h3 style="font-size:16px; color:var(--hit-navy); margin:22px 0 12px;">
-              🔗 系统中高度关联的协同商机需求（可联合采购 / 渠道共享）
-            </h3>
+            <h2 class="dx-page-head">关联商机</h2>
             <div id="matched-demands-container"></div>
           </div>
         </div>
       </div>
-    </div></section>
-
-    <section class="view-section" id="view-admin"><div class="app-wrap">
-      <div class="panel-card" style="margin-bottom:20px;">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">🛡️ 丁香会-AI时代 · 平台实名审核与中心节点人工撮合控制台</div>
-            <div class="panel-subtitle">
-              核验新注册校友的“学校官方平台电子校友卡凭证”，审批通过后解锁其个人能力与项目需求提交权限；跟进人工深度居间撮合工单。
+    </section>
+    <section class="view-section" id="view-admin">
+      <div class="dx-admin">
+        <aside class="dx-admin__sidebar">
+          <p class="dx-brand-lockup" style="color:#fff"><span class="dx-brandmark" aria-hidden="true">丁</span><span class="dx-brand">审核后台<small>中心节点</small></span></p>
+          <nav class="dx-admin__nav" aria-label="后台分区">
+            <a href="#admin-queue" class="is-current">审核队列</a>
+            <a href="#admin-matches">对接工单</a>
+          </nav>
+        </aside>
+        <div class="dx-admin__main">
+          <div class="dx-admin__top">
+            <p class="dx-help">核验新注册校友资料，审批通过后解锁能力与需求；跟进人工撮合工单。状态以文字徽章为准。</p>
+            <div class="dx-stat-grid" id="admin-stats"></div>
+          </div>
+          <section id="admin-queue">
+            <h2>校友实名认证队列</h2>
+            <div class="dx-admin-split">
+              <div class="dx-table-wrap">
+                <table class="dx-table dx-table--compact">
+                  <thead>
+                    <tr>
+                      <th scope="col">类型</th>
+                      <th scope="col">名称 / 标题</th>
+                      <th scope="col">提交人</th>
+                      <th scope="col">校区</th>
+                      <th scope="col">提交时间</th>
+                      <th scope="col">状态</th>
+                      <th scope="col">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="admin-users-list"></tbody>
+                </table>
+              </div>
+              <aside class="dx-review-panel" id="admin-review-panel">
+                <h2 id="review-title">选择一条记录开始审核</h2>
+                <p class="dx-muted dx-small" id="review-placeholder">在表格中选择查看，将在此处显示资料与通过 / 驳回操作。</p>
+                <div id="review-body" hidden>
+                  <p id="review-badge-wrap"></p>
+                  <div class="dx-preview"><dl id="review-dl"></dl></div>
+                  <div class="dx-field">
+                    <label for="review-reason">审核说明</label>
+                    <textarea class="dx-textarea" id="review-reason" maxlength="200" style="min-height:88px" aria-describedby="review-reason-help"></textarea>
+                    <span class="dx-help" id="review-reason-help">通过时可写备注；驳回时请填写原因。最多 200 字。</span>
+                  </div>
+                  <div class="dx-action-bar" id="review-actions"></div>
+                </div>
+              </aside>
             </div>
-          </div>
-          
+          </section>
+          <section id="admin-matches">
+            <h2>对接与撮合工单</h2>
+            <div id="admin-matches-list"></div>
+          </section>
         </div>
-
-        <h3 style="font-size:15.5px; color:var(--hit-navy); margin-bottom:12px;">
-          1. 校友实名认证与官方校友卡审核队列
-        </h3>
-        <div id="admin-users-list"></div>
       </div>
-
-      <div class="panel-card">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">🤝 2. 中心节点人工深度撮合与全库对接工单</div>
-            <div class="panel-subtitle">校友发起双向意向或委托中心节点人工居间撮合的项目记录及自愿回馈承诺</div>
-          </div>
-        </div>
-        <div id="admin-matches-list"></div>
-      </div>
-    </div></section>
+    </section>
   </main>
-  <footer class="colophon">
-    <div class="dx-container">
-      <p class="dx-brand">丁香会<small>汇聚资源，共创未来</small></p>
-      <p>丁香会-哈工大创业校友联合会。校友自发交流平台，不是哈尔滨工业大学的官方网站。</p>
-      <p>页面中的工程线稿是原创示意图，不是实景建筑，也不是学校标志。</p>
+  <footer class="dx-footer">
+    <div class="dx-container" style="display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;width:100%">
+      <p><strong>丁香会</strong>汇聚资源，共创未来</p>
+      <p>丁香会-哈工大创业校友联合会。校友自发交流平台，不是哈尔滨工业大学的官方网站。<br>页面中的轨道示意图和工程线稿是原创示意图，不是实景建筑，也不是学校标志。</p>
     </div>
   </footer>
   <dialog id="channel-dialog" class="dx-dialog" aria-labelledby="channel-dialog-title">
     <h2 id="channel-dialog-title">微信与短信</h2>
-    <p>微信扫码、微信内授权和短信都没有接入。这里不会显示已启用，也不能当作两步验证或严格双因子。</p>
+    <p>微信扫码、微信内授权和短信都没有接入真实服务时，这里不会显示已启用，也不能当作两步验证或严格双因子。</p>
     <button class="dx-button" type="button" id="close-channel-dialog" onclick="document.getElementById('channel-dialog').close()">关闭</button>
   </dialog>
-  <div class="toast-banner" id="global-toast" role="status"></div>
+  <div class="dx-toast-region" id="global-toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>

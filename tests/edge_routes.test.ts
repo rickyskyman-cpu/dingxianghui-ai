@@ -231,7 +231,9 @@ test("wechat and sms routes stay closed without contacting a provider", async ()
   assert.equal(start.status, 404);
   const verify = await call(db, "/api/auth/sms/verify", { method: "POST", body: { code: "000000" } });
   const verifyBody = await verify.json();
-  assert.equal(verifyBody.verified, false);
+  assert.equal(verifyBody.verified, undefined);
+  assert.equal(verify.status, 404);
+  assert.equal(JSON.stringify(verifyBody).includes("000000"), false);
 });
 
 test("approved alumni can still open their own directory route", async () => {

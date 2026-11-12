@@ -49,13 +49,10 @@ let currentUser = null;
 let currentView = "home";
 let currentWorkspaceStep = 1;
 let activeDemandIdForMatch = 1;
-let isRecordingVoice = false;
-let speechRecognitionInstance = null;
-let mediaRecorderInstance = null;
-let recordedAudioChunks = [];
 
 document.addEventListener("DOMContentLoaded", async () => {
   try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  await consumeWechatCallback();
   if (getToken()) {
     const r = await apiFetch("/api/me");
     if (r.ok) {
@@ -68,6 +65,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     } else setToken("");
   }
   updateHeaderUserStatus();
+  bindCounters();
+  await loadChannelStatus();
   if (location.search.includes("demo=")) {
     history.replaceState(null, "", location.pathname);
     showToast("演示入口已关闭。");
@@ -75,12 +74,65 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 function showToast(msg, duration = 4200) {
-  const el = document.getElementById("global-toast");
-  if (!el) return;
-  el.textContent = msg == null ? "" : String(msg);
-  el.style.display = "block";
+  const region = document.getElementById("global-toast");
+  if (!region) return;
+  region.innerHTML = "";
+  const toast = document.createElement("div");
+  toast.className = "dx-toast dx-toast--info";
+  toast.textContent = msg == null ? "" : String(msg);
+  region.appendChild(toast);
   clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => { el.style.display = "none"; }, duration);
+  window.__toastTimer = setTimeout(() => { region.innerHTML = ""; }, duration);
+}
+
+function setAlert(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg || "";
+  el.hidden = !msg;
+  if (msg) {
+    el.setAttribute("role", "alert");
+    el.setAttribute("aria-live", "assertive");
+  }
+}
+
+function showAuthMode(mode) {
+  const login = document.getElementById("auth-login");
+  const register = document.getElementById("auth-register");
+  if (login) login.hidden = mode !== "login";
+  if (register) register.hidden = mode !== "register";
+  const focusId = mode === "register" ? "reg-name" : "login-phone";
+  const field = document.getElementById(focusId);
+  if (field) field.focus();
+}
+
+function bindCounters() {
+  document.querySelectorAll("textarea[maxlength], input[maxlength]").forEach((el) => {
+    const counter = document.getElementById(el.id + "-count");
+    if (!counter) return;
+    const max = Number(el.getAttribute("maxlength") || 0);
+    const update = () => {
+      const n = [...el.value].length;
+      counter.textContent = n + " / " + max;
+      counter.classList.toggle("dx-counter--over", max && n > max);
+    };
+    if (!el.dataset.counterBound) {
+      el.addEventListener("input", update);
+      el.dataset.counterBound = "1";
+    }
+    update();
+  });
+}
+
+function badgeClass(status) {
+  if (status === "approved") return "dx-badge dx-badge--approved";
+  if (status === "rejected") return "dx-badge dx-badge--rejected";
+  if (status === "amended") return "dx-badge dx-badge--amended";
+  return "dx-badge dx-badge--pending";
+}
+
+function badgeLabel(status) {
+  return { approved: "已通过", rejected: "已驳回", amended: "已补充", pending: "待审核" }[status] || "待审核";
 }
 
 // ==================== Navigation & View Switching ====================
@@ -98,15 +150,15 @@ function switchView(viewName) {
   if (viewName === "feed") loadFeedView();
   else if (viewName === "workspace") renderWorkspaceView();
   else if (viewName === "admin") loadAdminDashboard();
-  else if (viewName === "auth") loadChannelStatus();
+  else if (viewName === "auth") { if (window.__keepAuthMode !== "register") showAuthMode("login"); window.__keepAuthMode = null; loadChannelStatus(); }
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
 }
 
 function showRegister() {
+  window.__keepAuthMode = "register";
   switchView("auth");
-  const name = document.getElementById("reg-name");
-  if (name) name.focus();
+  showAuthMode("register");
 }
 
 function updateHeaderUserStatus() {
@@ -127,9 +179,11 @@ function updateHeaderUserStatus() {
   }
   const state = isRealAdmin(currentUser)
     ? "管理员"
-    : currentUser.audit_status !== "approved"
-      ? "等待审核"
-      : currentUser.profile_completed ? "已通过审核" : "已通过审核，资料未完成";
+    : currentUser.audit_status === "rejected"
+      ? "已驳回"
+      : currentUser.audit_status !== "approved"
+        ? "等待审核"
+        : currentUser.profile_completed ? "已通过审核" : "已通过审核，资料未完成";
   pill.textContent = `${currentUser.real_name || ""} ${state}`;
 }
 
@@ -159,16 +213,88 @@ async function loadInternalOverview() {
   } catch (e) { box.textContent = ""; }
 }
 
+function phoneOk(value) { return /^1\d{10}$/.test(String(value || "").trim()); }
+function setBusy(button, busy, label) {
+  if (!button) return;
+  button.disabled = busy;
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+  if (label) button.textContent = busy ? "处理中" : label;
+}
 async function loadChannelStatus() {
   const box = document.getElementById("channel-status");
-  if (!box) return;
   const r = await apiFetch("/api/auth/channels");
   const d = r.ok ? await r.json() : {};
-  if (d.wechat_website || d.wechat_mp || d.sms) {
-    box.textContent = "部分渠道已由服务器打开。这里不会显示二维码或验证码，也不会把绑定说成严格双因子。";
+  window.__channelStatus = d;
+  if (box) box.textContent = d.sms || d.wechat_website ? "已开通的方式见下方。未开通的仍显示暂未开通，不能当作严格双因子。" : "微信扫码和短信验证码都未启用。";
+  const smsNote = document.getElementById("sms-login-note");
+  const smsForm = document.getElementById("sms-login-form");
+  const smsDisabled = document.getElementById("sms-login-disabled");
+  if (smsNote && smsForm) {
+    smsNote.hidden = !!d.sms;
+    smsForm.hidden = !d.sms;
+    if (!d.sms) smsNote.textContent = "短信验证码登录：暂未开通";
+  }
+  if (smsDisabled) smsDisabled.hidden = !!d.sms;
+  const wxNote = document.getElementById("wechat-login-note");
+  const wxLink = document.getElementById("wechat-login-link");
+  const wxDisabled = document.getElementById("wechat-login-disabled");
+  if (wxNote && wxLink) {
+    wxNote.hidden = !!d.wechat_website;
+    wxLink.hidden = !d.wechat_website;
+    if (!d.wechat_website) wxNote.textContent = "微信扫码登录：暂未开通";
+  }
+  if (wxDisabled) wxDisabled.hidden = !!d.wechat_website;
+  const send = document.getElementById("sms-send");
+  if (send && !send.dataset.bound) {
+    send.dataset.bound = "1";
+    send.addEventListener("click", sendSmsCode);
+  }
+  if (d.wechat_website) startWechatLogin();
+  if (currentUser) renderWechatBind();
+}
+
+function tidyAuthQuery() {
+  const params = new URLSearchParams(location.search);
+  ["code", "state", "error", "error_description", "wechat"].forEach((key) => params.delete(key));
+  const qs = params.toString();
+  const next = location.pathname + (qs ? `?${qs}` : "") + (location.hash && !location.hash.includes("dxh_") ? location.hash : "");
+  history.replaceState(null, "", next || location.pathname);
+}
+
+async function consumeWechatCallback() {
+  const params = new URLSearchParams(location.search);
+  const hash = new URLSearchParams((location.hash || "").replace(/^#/, "").replace(/&/g, "&"));
+  const hashToken = hash.get("dxh_session");
+  const wechatFlag = hash.get("dxh_wechat");
+  const code = params.get("code");
+  const state = params.get("state");
+  if (!hashToken && !wechatFlag && !code && !state && !params.get("error")) return;
+  const finish = (msg) => { tidyAuthQuery(); if (msg) showToast(msg); };
+  if (hashToken) {
+    setToken(hashToken);
+    finish("微信登录已完成。");
     return;
   }
-  box.textContent = "微信扫码、微信内授权和短信都未启用。同时绑定也不等于每次登录都要再验一次，也不是严格双因子。";
+  if (wechatFlag === "bound") { finish("微信已绑定。"); return; }
+  if (wechatFlag === "error" || params.get("error")) { finish("微信登录没有完成。"); return; }
+  if (code && state) {
+    const res = await apiFetch("/api/auth/wechat/callback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, state }) });
+    const data = res.ok ? await res.json() : { detail: (await res.json().catch(() => ({}))).detail };
+    tidyAuthQuery();
+    if (!res.ok) { showToast(data.detail || "微信登录没有完成。"); return; }
+    if (data.token) {
+      setToken(data.token);
+      currentUser = data.user || currentUser;
+      showToast(data.message || "微信登录已完成。");
+      return;
+    }
+    if (data.bound && data.user) {
+      currentUser = data.user;
+      showToast("微信已绑定。");
+    }
+    return;
+  }
+  tidyAuthQuery();
 }
 
 function onAlumniCardSelected() {
@@ -176,7 +302,7 @@ function onAlumniCardSelected() {
   const box = document.getElementById("ocr-result-box");
   const file = input && input.files && input.files[0];
   if (!box) return;
-  box.style.display = "block";
+  box.hidden = false;
   if (!file) { box.textContent = ""; return; }
   const ext = (file.name.split(".").pop() || "").toLowerCase();
   if (!CARD_TYPES.includes(file.type) || !["jpg", "jpeg", "png", "webp"].includes(ext)) {
@@ -193,17 +319,13 @@ function onAlumniCardSelected() {
 }
 
 function postCard(p) {
-  const tags = (p.tags || []).slice(0, 4).map((t) => `<span class="badge ${(p.related_fields || []).includes(t) ? "badge-gold" : "badge-navy"}">${t}</span>`).join(" ");
-  return `<div class="data-item-card" style="border-left:4px solid ${p.post_type === "供给" ? "#0d9488" : "#7c3aed"}">
-    <div class="item-top-line"><div>
-      <span class="badge ${p.post_type === "供给" ? "badge-success" : "badge-lilac"}">${p.post_type}</span>
-      <span class="item-name">${p.title}</span>${p.is_mine ? ' <span class="badge badge-gold">我发布的</span>' : ""}
-    </div><span style="font-size:12px;color:var(--text-muted)">${p.created_at || ""}</span></div>
-    <div style="font-size:13px;color:var(--text-secondary);margin:6px 0;">${p.summary}</div>
-    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;font-size:12.5px;">
-      <span>🏷️ ${p.industry} · ${p.category} ${tags}</span>
-      <span style="color:var(--text-muted)">发布校友：${p.poster}</span>
-    </div></div>`;
+  const tags = (p.tags || []).slice(0, 4).map((t) => `<span class="dx-tag">${esc(t)}</span>`).join(" ");
+  return `<article class="dx-match-card">
+    <div class="dx-match-card__meta"><span class="dx-tag">${esc(p.post_type)}</span><span class="dx-tag">${esc(p.industry)}</span>${tags}</div>
+    <h3>${esc(p.title)}${p.is_mine ? ' <span class="dx-badge dx-badge--amended">我发布的</span>' : ""}</h3>
+    <p>${esc(p.summary)}</p>
+    <p class="dx-help">${esc(p.category)} ｜ ${esc(p.created_at || "")} ｜ ${esc(p.poster)}</p>
+  </article>`;
 }
 
 async function loadFeedView() {
@@ -216,15 +338,17 @@ async function loadFeedView() {
   const r = await apiFetch("/api/feed");
   const d = await r.json();
   if (!r.ok) {
-    postsBox.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-muted);">🔒 ${d.detail || "请先登录"}</div>`;
+    postsBox.innerHTML = `<div class="dx-state">${esc(d.detail || "请先登录")}</div>`;
     document.getElementById("feed-alumni").innerHTML = ""; return;
   }
   document.getElementById("feed-my-fields").textContent = d.my_fields.length ? `按您的画像领域推荐：${d.my_fields.join("、")}` : "您尚未完善个人能力画像，以下为最新发布";
-  postsBox.innerHTML = d.posts.length ? d.posts.map(postCard).join("") : '<div style="color:var(--text-muted)">暂无相关领域发布</div>';
-  document.getElementById("feed-alumni").innerHTML = d.alumni.map((a) => `<div class="data-item-card">
-    <div class="item-top-line"><span class="item-name">${a.poster}</span><span style="font-size:12px;color:var(--text-muted)">${a.city || ""}</span></div>
-    <div style="font-size:13px;color:var(--text-secondary);margin:4px 0;">${a.capability_summary}</div>
-    <div>${a.industry_tags.map((t) => `<span class="badge ${a.related_fields.includes(t) ? "badge-gold" : "badge-navy"}">${t}</span>`).join(" ")}</div></div>`).join("") || '<div style="color:var(--text-muted)">暂无</div>';
+  postsBox.innerHTML = d.posts.length ? d.posts.map(postCard).join("") : '<div class="dx-state"><h2>暂无相关领域发布</h2></div>';
+  document.getElementById("feed-alumni").innerHTML = d.alumni.map((a) => `<article class="dx-match-card">
+    <div class="dx-match-card__meta">${(a.industry_tags||[]).map((t)=>`<span class="dx-tag">${esc(t)}</span>`).join(" ")}</div>
+    <h3>${esc(a.poster)}</h3>
+    <p>${esc(a.capability_summary)}</p>
+    <p class="dx-help">${esc(a.city || "")}</p>
+  </article>`).join("") || '<div class="dx-state">暂无</div>';
   const sel = document.getElementById("feed-search-industry");
   if (sel.options.length <= 1) {
     const inds = ["具身智能","航空航天","低空经济","商业航天","新能源","工商业储能","新材料","碳纤维","智能制造","精密加工","工业视觉","人工智能","大模型Agent","半导体装备","电力电子","伺服系统","精密仪器","生物医药","手术机器人","节能环保","海洋工程","硬科技创投","出海渠道"];
@@ -242,7 +366,7 @@ async function runFeedSearch() {
   const r = await apiFetch(`/api/search?${q}`);
   const d = await r.json();
   if (!r.ok) { box.innerHTML = `<div style="color:var(--text-muted)">🔒 ${d.detail}</div>`; return; }
-  box.innerHTML = `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">共找到 ${d.total_shown} 条</div>` + (d.results.map(postCard).join("") || "");
+  box.innerHTML = `<p class="dx-help" role="status">共找到 ${d.total_shown} 条</p>` + (d.results.length ? d.results.map(postCard).join("") : "");
 }
 
 function fillSampleRegistration() {
@@ -279,25 +403,42 @@ async function handleRegisterSubmit(e) {
     password: document.getElementById("reg-pwd").value,
     is_demo: false,
   };
-  if (!passwordAcceptable(payload.password)) {
-    showToast("密码至少 8 位。");
+  const phoneError = document.getElementById("register-error");
+  const confirm = document.getElementById("reg-pwd-confirm");
+  const confirmErr = document.getElementById("reg-pwd-confirm-error");
+  if (!phoneOk(payload.phone)) {
+    setAlert("register-error", "请输入11位中国大陆手机号。");
+    document.getElementById("reg-phone").focus();
     return;
   }
-
+  if (!passwordAcceptable(payload.password)) {
+    setAlert("register-error", "请将密码设置为8到72位。");
+    return;
+  }
+  if (confirm && confirm.value !== payload.password) {
+    if (confirmErr) { confirmErr.hidden = false; confirmErr.textContent = "两次输入的密码不一致。"; }
+    confirm.focus();
+    return;
+  }
+  if (confirmErr) { confirmErr.hidden = true; confirmErr.textContent = ""; }
+  setAlert("register-error", "");
+  const submit = document.getElementById("register-submit");
+  setBusy(submit, true, "提交注册申请");
   const res = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
+  setBusy(submit, false, "提交注册申请");
   if (!res.ok) {
-    showToast(`❌ 注册失败：${data.detail}`);
+    setAlert("register-error", data.detail || "注册没有完成。");
     return;
   }
   setToken(data.token);
   currentUser = data.user;
   updateHeaderUserStatus();
-  showToast(`🎉 ${data.message}`);
+  showToast(data.message || "已提交，等待审核。");
   switchView("workspace");
 }
 
@@ -305,14 +446,20 @@ async function handleLoginSubmit(e) {
   e.preventDefault();
   const phone = document.getElementById("login-phone").value;
   const password = document.getElementById("login-pwd").value;
+  const error = document.getElementById("login-error");
+  if (!phoneOk(phone)) { setAlert("login-error", "请输入11位中国大陆手机号。"); document.getElementById("login-phone").focus(); return; }
+  setAlert("login-error", "");
+  const submit = document.getElementById("login-submit");
+  setBusy(submit, true, "登录");
   const res = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, password }),
   });
   const data = await res.json();
+  setBusy(submit, false, "登录");
   if (!res.ok) {
-    showToast(`❌ 登录失败：${data.detail}`);
+    setAlert("login-error", data.detail || "登录没有完成。");
     return;
   }
   if (isDemoActor(data.user)) {
@@ -330,7 +477,7 @@ async function handleLoginSubmit(e) {
 }
 
 function passwordAcceptable(password) {
-  return typeof password === "string" && password.length >= 8 && password.length <= 200;
+  return typeof password === "string" && password.length >= 8 && password.length <= 72;
 }
 
 // ==================== VIEW 3: Personal Profile, Voice Demand Submission & AI Smart Matching ====================
@@ -339,10 +486,13 @@ async function renderWorkspaceView() {
   const pendingBox = document.getElementById("ws-pending-box");
   const approvedBox = document.getElementById("ws-approved-container");
 
+  const setWs = (mode) => {
+    if (unauthBox) unauthBox.hidden = mode !== "unauth";
+    if (pendingBox) pendingBox.hidden = mode !== "pending";
+    if (approvedBox) approvedBox.hidden = mode !== "approved";
+  };
   if (!currentUser) {
-    unauthBox.style.display = "block";
-    pendingBox.style.display = "none";
-    approvedBox.style.display = "none";
+    setWs("unauth");
     return;
   }
 
@@ -355,9 +505,7 @@ async function renderWorkspaceView() {
   } else if (res.status === 401) {
     currentUser = null;
     updateHeaderUserStatus();
-    unauthBox.style.display = "block";
-    pendingBox.style.display = "none";
-    approvedBox.style.display = "none";
+    setWs("unauth");
     return;
   }
   if (isDemoActor(currentUser)) {
@@ -365,51 +513,41 @@ async function renderWorkspaceView() {
     showToast("演示账号不能再进入。");
     return;
   }
+  const changeBox = document.getElementById("password-change-box");
+  if (changeBox) changeBox.hidden = !currentUser.must_change_password;
+  renderWechatBind();
 
   if (currentUser.audit_status !== "approved") {
-    unauthBox.style.display = "none";
-    pendingBox.style.display = "block";
-    approvedBox.style.display = "none";
-
-    document.getElementById("ws-pending-user-summary").innerHTML = `
-      <div style="font-weight:800; color:var(--hit-navy); margin-bottom:8px;">
-        📋 您提交的校友实名与官方校友卡注册信息：
-      </div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; font-size:13.5px;">
-        <div><strong>真实姓名：</strong>${currentUser.real_name}</div>
-        <div><strong>手机号：</strong>${currentUser.phone}</div>
-        <div><strong>校区与届别：</strong>${currentUser.campus} · ${currentUser.enroll_year}</div>
-        <div><strong>院系专业：</strong>${currentUser.department}</div>
-        <div><strong>所在企业：</strong>${currentUser.company}（${currentUser.position}）</div>
-        <div><strong>官方校友卡号：</strong><span class="badge badge-navy">${currentUser.alumni_card_no}</span></div>
-        <div><strong>引流来源：</strong>${currentUser.referrer_source}</div>
-        <div><strong>当前审核状态：</strong><span class="badge badge-warning">待中心节点管理员复核</span></div>
-      </div>
-    `;
+    setWs("pending");
+    const rejected = currentUser.audit_status === "rejected";
+    const badgeWrap = document.getElementById("ws-pending-badge-wrap");
+    const title = document.getElementById("ws-pending-title");
+    const copy = document.getElementById("ws-pending-copy");
+    if (badgeWrap) badgeWrap.innerHTML = `<span class="${badgeClass(rejected ? "rejected" : "pending")}">${badgeLabel(rejected ? "rejected" : "pending")}</span>`;
+    if (title) title.textContent = rejected ? "注册申请已驳回" : "注册申请正在审核";
+    if (copy) copy.textContent = rejected ? (currentUser.audit_note || "资料需要补充后再提交。审核完成前只能看到品牌介绍与本页。") : "审核完成前只能看到品牌介绍与本页。通过后即可填写能力档案并查看供需。";
+    document.getElementById("ws-pending-user-summary").innerHTML = `<dl>
+      <div><dt>真实姓名</dt><dd>${esc(currentUser.real_name)}</dd></div>
+      <div><dt>手机号</dt><dd>${esc(currentUser.phone)}</dd></div>
+      <div><dt>校区与届别</dt><dd>${esc(currentUser.campus)} · ${esc(currentUser.enroll_year)}</dd></div>
+      <div><dt>院系专业</dt><dd>${esc(currentUser.department)}</dd></div>
+      <div><dt>所在企业</dt><dd>${esc(currentUser.company)}（${esc(currentUser.position)}）</dd></div>
+      <div><dt>校友卡编号</dt><dd>${esc(currentUser.alumni_card_no)}</dd></div>
+      <div><dt>引流来源</dt><dd>${esc(currentUser.referrer_source)}</dd></div>
+    </dl>`;
     return;
   }
 
-  // User is approved!
-  unauthBox.style.display = "none";
-  pendingBox.style.display = "none";
-  approvedBox.style.display = "block";
+  setWs("approved");
 
   document.getElementById("ws-user-banner-info").innerHTML = `
-    <div style="font-size:17px; font-weight:800;">
-      👨‍🎓 ${currentUser.real_name} · ${currentUser.enroll_year} ${currentUser.department}（${currentUser.campus}）
-    </div>
-    <div style="font-size:13px; color:#cbd5e1; margin-top:2px;">
-      🏢 ${currentUser.company} · ${currentUser.position} | 📍 ${currentUser.city} | 🪪 官方校友卡号：${currentUser.alumni_card_no}
-    </div>
+    <p><strong>${esc(currentUser.real_name)}</strong> · ${esc(currentUser.enroll_year)} ${esc(currentUser.department)}（${esc(currentUser.campus)}）</p>
+    <p class="dx-help">${esc(currentUser.company)} · ${esc(currentUser.position)} ｜ ${esc(currentUser.city)}</p>
   `;
 
   document.getElementById("ws-user-banner-badges").innerHTML = `
-    <span class="badge badge-success">✅ 实名与校友卡已过审</span>
-    ${
-      currentUser.profile_completed
-        ? `<span class="badge badge-gold">✅ 个人能力画像已完善（已解锁提需求）</span>`
-        : `<span class="badge badge-warning">⚠️ 个人能力画像待完善（完善后可提需求）</span>`
-    }
+    <span class="dx-badge dx-badge--approved">已通过</span>
+    ${currentUser.profile_completed ? '<span class="dx-badge dx-badge--approved">能力档案已完善</span>' : '<span class="dx-badge dx-badge--pending">能力档案待完善</span>'}
   `;
 
   // Populate Step 1 form with current user values
@@ -427,18 +565,15 @@ async function renderWorkspaceView() {
   const step2Tab = document.getElementById("step-tab-2");
 
   if (currentUser.profile_completed) {
-    step1Badge.className = "badge badge-success";
-    step1Badge.textContent = "✅ 已完善";
-    step2Badge.className = "badge badge-success";
-    step2Badge.textContent = "🎙️ 已解锁·可提需求";
-    step2Tab.classList.remove("locked");
+    if (step1Badge) { step1Badge.className = "dx-badge dx-badge--approved"; step1Badge.textContent = "已完善"; }
+    if (step2Badge) { step2Badge.className = "dx-badge dx-badge--approved"; step2Badge.textContent = "已解锁"; }
+    if (step2Tab) step2Tab.classList.remove("locked");
   } else {
-    step1Badge.className = "badge badge-warning";
-    step1Badge.textContent = "必填前置";
-    step2Badge.className = "badge badge-navy";
-    step2Badge.textContent = "🔒 需先完成第一步";
-    step2Tab.classList.add("locked");
+    if (step1Badge) { step1Badge.className = "dx-badge dx-badge--pending"; step1Badge.textContent = "待完善"; }
+    if (step2Badge) { step2Badge.className = "dx-badge"; step2Badge.textContent = "待解锁"; }
+    if (step2Tab) step2Tab.classList.add("locked");
   }
+  bindCounters();
 
   // Default step based on whether profile is completed
   if (!currentUser.profile_completed) {
@@ -456,11 +591,11 @@ async function quickApproveCurrentUser() {
 
 function selectWorkspaceStep(stepNum, skipGateAlert = false) {
   const gateAlert = document.getElementById("profile-gate-alert");
-  gateAlert.style.display = "none";
+  if (gateAlert) gateAlert.hidden = true;
 
   // Enforce mandatory personal profile before Step 2 demand submission
   if (stepNum === 2 && currentUser && !currentUser.profile_completed) {
-    gateAlert.style.display = "block";
+    if (gateAlert) gateAlert.hidden = false;
     showToast("⚠️ 拦截提示：原则上要求注册校友先把自己的个人与企业情况介绍清楚，保存后才能提交项目需求！");
     stepNum = 1;
   }
@@ -469,175 +604,16 @@ function selectWorkspaceStep(stepNum, skipGateAlert = false) {
   [1, 2, 3].forEach((n) => {
     const tab = document.getElementById(`step-tab-${n}`);
     const panel = document.getElementById(`ws-step-${n}-panel`);
-    if (tab) tab.classList.toggle("active", n === stepNum);
-    if (panel) panel.style.display = n === stepNum ? "block" : "none";
+    if (tab) {
+      tab.classList.toggle("dx-stepper__item--current", n === stepNum);
+      tab.classList.toggle("dx-stepper__item--done", n < stepNum);
+    }
+    if (panel) panel.hidden = n !== stepNum;
   });
+  if (stepNum === 2) showDemandPane(currentDemandPane || 1);
 
   if (stepNum === 3) {
     populateDemandSelectorAndLoadMatch();
-  }
-}
-
-// ==================== Voice Input (Web Speech + MediaRecorder + AI Presets) ====================
-async function runPresetVoice(mode, presetKey) {
-  const statusBadge = document.getElementById(
-    mode === "profile" ? "profile-voice-status" : "demand-voice-status"
-  );
-  if (statusBadge) {
-    statusBadge.textContent = "🎙️ 正在接收语音并调用后台AI转写与提取...";
-  }
-
-  const res = await apiFetch("/api/ai/voice-to-text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: mode,
-      preset_key: presetKey,
-      user_city: currentUser?.city || "深圳",
-    }),
-  });
-  const data = await res.json();
-
-  if (mode === "profile") {
-    document.getElementById("profile-voice-raw").value = data.transcript;
-    applyExtractedProfile(data.extracted);
-    if (statusBadge) statusBadge.textContent = "✅ AI已完成语音转文字与能力字段提取";
-    showToast("🎙️ 后台AI已将校友语音自述转换为文字，并自动填好下方个人与企业能力画像表单！");
-  } else {
-    document.getElementById("demand-voice-raw").value = data.transcript;
-    applyExtractedDemand(data.structured);
-    if (statusBadge) statusBadge.textContent = `✅ AI已转写语音(${data.duration || "00:18"})并提炼结构化需求`;
-    showToast("🎙️ 后台AI已将语音转换为文字需求，并自动提炼出项目标题、类别、预算规模与合作标签！");
-  }
-}
-
-async function parseProfileFromTextarea() {
-  const raw = document.getElementById("profile-voice-raw").value.trim();
-  if (!raw) {
-    showToast("请先点击上方语音按钮录音/选择语音示例，或在文本框中输入口语自我介绍");
-    return;
-  }
-  const res = await apiFetch("/api/ai/voice-to-text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "profile", raw_text: raw }),
-  });
-  const data = await res.json();
-  applyExtractedProfile(data.extracted);
-  showToast("✨ 已根据您的口述内容自动提取并填充个人能力画像表单！");
-}
-
-function applyExtractedProfile(ext) {
-  if (!ext) return;
-  document.getElementById("prof-bio").value = ext.bio_detail || "";
-  document.getElementById("prof-capabilities").value = ext.core_capabilities || "";
-  document.getElementById("prof-provide-types").value = (ext.can_provide_types || []).join(", ");
-  document.getElementById("prof-industry-tags").value = (ext.industry_tags || []).join(", ");
-  document.getElementById("prof-coop-modes").value = ext.coop_modes || "";
-}
-
-async function parseDemandFromTextarea() {
-  const raw = document.getElementById("demand-voice-raw").value.trim();
-  if (!raw) {
-    showToast("请先录音、点击语音示例按钮，或在文本框中输入您的需求口述内容");
-    return;
-  }
-  const res = await apiFetch("/api/ai/voice-to-text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: "demand",
-      raw_text: raw,
-      user_city: currentUser?.city || "深圳",
-    }),
-  });
-  const data = await res.json();
-  applyExtractedDemand(data.structured);
-  showToast("🤖 后台AI已将口述内容转换为结构化项目合作需求卡片！");
-}
-
-function applyExtractedDemand(st) {
-  if (!st) return;
-  document.getElementById("dem-title").value = st.title || "";
-  document.getElementById("dem-category").value = st.category || "找供应链/核心部件";
-  document.getElementById("dem-industry").value = st.industry || "具身智能";
-  document.getElementById("dem-city").value = st.city || currentUser?.city || "深圳";
-  document.getElementById("dem-desc").value = st.description || "";
-  document.getElementById("dem-budget").value = st.budget_scale || "";
-  document.getElementById("dem-partner").value = st.expected_partner || "";
-  document.getElementById("dem-tags").value = (st.tags || []).join(", ");
-}
-
-async function toggleVoiceRecording(mode) {
-  const btn = document.getElementById(mode === "profile" ? "profile-mic-btn" : "demand-mic-btn");
-  const statusBadge = document.getElementById(
-    mode === "profile" ? "profile-voice-status" : "demand-voice-status"
-  );
-  const rawBox = document.getElementById(
-    mode === "profile" ? "profile-voice-raw" : "demand-voice-raw"
-  );
-
-  if (isRecordingVoice) {
-    // Stop recording
-    isRecordingVoice = false;
-    btn.classList.remove("recording");
-    btn.innerHTML = mode === "profile" ? "🎙️ 点击开始麦克风录音介绍" : "🎙️ 按下开始语音说需求";
-    if (speechRecognitionInstance) {
-      try { speechRecognitionInstance.stop(); } catch (e) {}
-    }
-    if (mediaRecorderInstance && mediaRecorderInstance.state !== "inactive") {
-      try { mediaRecorderInstance.stop(); } catch (e) {}
-    }
-    if (statusBadge) statusBadge.textContent = "✅ 录音结束，正在由后台AI解析...";
-    if (rawBox.value.trim()) {
-      if (mode === "profile") {
-        await parseProfileFromTextarea();
-      } else {
-        await parseDemandFromTextarea();
-      }
-    }
-    return;
-  }
-
-  // Start recording
-  isRecordingVoice = true;
-  btn.classList.add("recording");
-  btn.innerHTML = "⏹️ 正在聆听您的语音...（点击结束并AI转写）";
-  if (statusBadge) statusBadge.textContent = "🔴 麦克风实时收音中...";
-
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    speechRecognitionInstance = new SpeechRecognition();
-    speechRecognitionInstance.lang = "zh-CN";
-    speechRecognitionInstance.continuous = true;
-    speechRecognitionInstance.interimResults = true;
-    speechRecognitionInstance.onresult = (event) => {
-      let transcript = "";
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      rawBox.value = transcript;
-    };
-    speechRecognitionInstance.onerror = () => {
-      // Fallback to realistic voice sample if no physical microphone in headless/server environment
-      isRecordingVoice = false;
-      btn.classList.remove("recording");
-      btn.innerHTML = mode === "profile" ? "🎙️ 点击开始麦克风录音介绍" : "🎙️ 按下开始语音说需求";
-      runPresetVoice(mode, mode === "profile" ? "profile_sample_1" : "demand_sample_1");
-    };
-    try {
-      speechRecognitionInstance.start();
-    } catch (e) {
-      runPresetVoice(mode, mode === "profile" ? "profile_sample_1" : "demand_sample_1");
-    }
-  } else {
-    // Browser doesn't expose Web Speech API or no mic attached -> automatically run realistic voice simulation after 1s
-    setTimeout(() => {
-      isRecordingVoice = false;
-      btn.classList.remove("recording");
-      btn.innerHTML = mode === "profile" ? "🎙️ 点击开始麦克风录音介绍" : "🎙️ 按下开始语音说需求";
-      runPresetVoice(mode, mode === "profile" ? "profile_sample_1" : "demand_sample_1");
-    }, 900);
   }
 }
 
@@ -705,7 +681,7 @@ async function handleCreateDemand(e) {
     budget_scale: document.getElementById("dem-budget").value,
     expected_partner: document.getElementById("dem-partner").value,
     tags: tags,
-    raw_voice_text: document.getElementById("demand-voice-raw").value,
+    raw_voice_text: "",
     need_manual_broker: document.getElementById("dem-broker").checked ? 1 : 0,
     voluntary_pledge: document.getElementById("dem-pledge").value,
   };
@@ -722,9 +698,11 @@ async function handleCreateDemand(e) {
   }
 
   activeDemandIdForMatch = data.demand.id;
-  showToast(`🚀 ${data.message}`);
-  selectWorkspaceStep(3, true);
-  renderMatchReportUI(data.demand, data.match_report);
+  showToast(data.message);
+  const success = document.getElementById("demand-success-copy");
+  if (success) success.textContent = `${data.message || "需求已提交。"} 匹配来源：${data.match_source || "规则匹配"}。`;
+  showDemandPane(4);
+  renderMatchReportUI(data.demand, data.match_report, data.match_source);
 }
 
 // ==================== Step 3: Load & Render AI Smart Matching Report ====================
@@ -745,108 +723,72 @@ async function loadDemandMatchReport(demandId) {
   const res = await apiFetch(`/api/demands/${activeDemandIdForMatch}/match`);
   if (!res.ok) return;
   const data = await res.json();
-  renderMatchReportUI(data.demand, data.match_report);
+  renderMatchReportUI(data.demand, data.match_report, data.match_source);
 }
 
-function renderMatchReportUI(demand, report) {
+function renderMatchReportUI(demand, report, matchSource) {
   const banner = document.getElementById("active-demand-banner");
-  banner.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-      <div>
-        <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-          <span class="badge badge-gold">${demand.demand_code}</span>
-          <span class="badge badge-lilac">${demand.category}</span>
-          <span style="font-size:12.5px; color:#cbd5e1;">📍 ${demand.city} · 💰 ${demand.budget_scale}</span>
+  const empty = document.getElementById("match-empty");
+  const rawSource = matchSource || report?.match_source || report?.summary_headline || "";
+  const isAi = /deepseek/i.test(String(rawSource));
+  const source = isAi ? "deepseek" : "规则匹配";
+  const sourceLabel = isAi ? "DeepSeek 匹配" : "规则匹配";
+  if (!report || !(report.matched_alumni || []).length) {
+    if (banner) banner.hidden = !demand;
+    if (empty) empty.hidden = false;
+  } else if (empty) empty.hidden = true;
+  if (banner && demand) {
+    banner.hidden = false;
+    banner.innerHTML = `
+      <div class="dx-form-card__head">
+        <div>
+          <p class="dx-help">${esc(demand.demand_code || "")} · ${esc(demand.category || "")} · ${esc(demand.city || "")}</p>
+          <h2>${esc(demand.title)}</h2>
         </div>
-        <h3 style="font-size:18px; font-weight:800; margin-bottom:6px;">${demand.title}</h3>
-        <p style="font-size:13.5px; color:#e2e8f0; margin-bottom:10px;">${demand.description}</p>
-        ${
-          demand.raw_voice_text
-            ? `<div style="background:rgba(255,255,255,0.1); padding:8px 12px; border-radius:7px; font-size:12.5px; color:#f6e05e; margin-bottom:8px;">
-                🎙️ <strong>原始语音转写：</strong>“${demand.raw_voice_text}”
-              </div>`
-            : ""
-        }
+        <span class="dx-badge ${source === "deepseek" ? "dx-badge--amended" : "dx-badge--approved"}">${esc(sourceLabel)}</span>
       </div>
-      <div style="text-align:right;">
-        <div style="font-size:28px; font-weight:900; color:#f6e05e;">${report.best_match_score}%</div>
-        <div style="font-size:12px; color:#cbd5e1;">最高AI综合匹配度</div>
-      </div>
-    </div>
-    <div style="border-top:1px solid rgba(255,255,255,0.16); padding-top:10px; margin-top:8px; font-size:13px; color:#f8fafc;">
-      <div><strong>🧠 ${report.summary_headline}</strong></div>
-      <div style="white-space:pre-line; color:#cbd5e1; margin-top:4px; font-size:12.5px;">${report.strategy_advice}</div>
-    </div>
-  `;
-
-  const alumniContainer = document.getElementById("matched-alumni-container");
-  alumniContainer.innerHTML = report.matched_alumni
-    .map(
-      (m, idx) => `
-      <div class="match-card">
-        <div class="item-top-line">
-          <div>
-            <span class="badge badge-gold" style="margin-right:6px;">TOP ${idx + 1}</span>
-            <span class="item-name">${m.masked_name}</span>
-            <span style="font-size:13px; color:var(--hit-blue); font-weight:700; margin-left:8px;">
-              🏢 ${m.masked_company} · ${m.position}
-            </span>
-          </div>
-          <span class="match-score-pill">🧠 AI匹配度 ${m.match_score}%</span>
-        </div>
-
-        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px;">
-          <strong>核心能力画像：</strong>${m.core_capabilities}
-        </div>
-
-        <div class="ai-analysis-box">
-          <div style="margin-bottom:4px;"><strong>📌 AI匹配依据：</strong>${m.ai_reason}</div>
-          <div style="margin-bottom:4px;"><strong>⚙️ 上下游互补分析：</strong>${m.complementarity}</div>
-          <div><strong>💡 AI建议合作切入方式：</strong>${m.suggested_action}</div>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px;">
-          <div class="tag-row" style="margin-top:0;">
-            <span class="badge badge-navy">📍 ${m.city} · ${m.campus.replace("(哈尔滨)", "")}</span>
-            ${m.industry_tags.map((t) => `<span class="tag-chip">#${t}</span>`).join("")}
-          </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-sm btn-outline" onclick="initiateMatchIntent(${demand.id}, ${m.target_id}, 0)">
-              🤝 发起双向匿名确认对接
-            </button>
-            <button class="btn btn-sm btn-gold" onclick="initiateMatchIntent(${demand.id}, ${m.target_id}, 1)">
-              🏅 委托中心节点人工深度撮合
-            </button>
-          </div>
-        </div>
-      </div>
-    `
-    )
-    .join("");
-
-  const demandsContainer = document.getElementById("matched-demands-container");
-  if (!report.matched_demands || report.matched_demands.length === 0) {
-    demandsContainer.innerHTML = `<div style="color:var(--text-muted); font-size:13px;">暂无其他关联商机</div>`;
-  } else {
-    demandsContainer.innerHTML = report.matched_demands
-      .map(
-        (od) => `
-        <div class="data-item-card">
-          <div class="item-top-line">
-            <div>
-              <span class="badge badge-navy">${od.demand_code}</span>
-              <span class="item-name" style="margin-left:6px;">${od.title}</span>
-            </div>
-            <span class="badge badge-success">商机协同度 ${od.match_score}%</span>
-          </div>
-          <div style="font-size:13px; color:var(--text-secondary);">
-            ${od.synergy_note}（规模：${od.budget_scale} · 城市：${od.city}）
-          </div>
-        </div>
-      `
-      )
-      .join("");
+      <p>${esc(demand.description || "")}</p>
+      <p class="dx-help">${esc(report.summary_headline || "")}。${esc(report.strategy_advice || "分数用于排序参考，不是认证。")}</p>
+    `;
   }
+  const alumniContainer = document.getElementById("matched-alumni-container");
+  const alumni = report?.matched_alumni || [];
+  alumniContainer.innerHTML = alumni.map((m, idx) => {
+    const reasons = [m.ai_reason, m.complementarity, m.suggested_action].filter(Boolean);
+    const score = Number(m.match_score) || 0;
+    return `<article class="dx-match-card">
+      <div class="dx-match-card__body">
+        <div class="dx-match-card__meta">
+          <span class="dx-tag">${esc(m.city || "")}</span>
+          <span class="dx-tag">${esc(m.campus || "")}</span>
+          ${(m.industry_tags || []).map((t) => `<span class="dx-tag">${esc(t)}</span>`).join("")}
+        </div>
+        <h3>${esc(m.masked_name)}</h3>
+        <p>${esc(m.core_capabilities || m.masked_company || "")}</p>
+        <p class="dx-help">匹配理由</p>
+        <ul class="dx-match-reasons">${reasons.map((r) => `<li>${esc(r)}</li>`).join("") || "<li>领域或标签相近</li>"}</ul>
+        <div class="dx-action-bar">
+          <button class="dx-button dx-button--secondary" type="button" onclick="initiateMatchIntent(${Number(demand.id)}, ${Number(m.target_id)}, 0)">发起双向匿名确认</button>
+          <button class="dx-button" type="button" onclick="initiateMatchIntent(${Number(demand.id)}, ${Number(m.target_id)}, 1)">委托中心节点撮合</button>
+        </div>
+      </div>
+      <div class="dx-match-score">
+        <div class="dx-match-score__label">匹配度（${esc(sourceLabel)}）</div>
+        <div class="dx-match-score__value">${score}%</div>
+        <div class="dx-score-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${score}" aria-label="匹配度 ${score}%">
+          <span class="dx-score-bar__fill" style="width:${Math.max(0, Math.min(100, score))}%"></span>
+        </div>
+      </div>
+    </article>`;
+  }).join("");
+  if (empty) empty.hidden = alumni.length > 0;
+  const demandsContainer = document.getElementById("matched-demands-container");
+  const ods = report?.matched_demands || [];
+  demandsContainer.innerHTML = ods.length ? ods.map((od) => `<article class="dx-match-card">
+    <div class="dx-match-card__meta"><span class="dx-tag">${esc(od.demand_code || "")}</span></div>
+    <h3>${esc(od.title)}</h3>
+    <p class="dx-help">${esc(od.synergy_note || "")} · ${esc(od.budget_scale || "")} · ${esc(od.city || "")}</p>
+  </article>`).join("") : '<p class="dx-help">暂无其他关联商机</p>';
 }
 
 async function initiateMatchIntent(demandId, targetId, brokerAssisted) {
@@ -870,101 +812,100 @@ async function initiateMatchIntent(demandId, targetId, brokerAssisted) {
 }
 
 // ==================== VIEW 4: Admin Audit & Central Node Console ====================
+let adminQueue = [];
+function statusOfUser(u) {
+  if (u.audit_status === "approved") return "approved";
+  if (u.audit_status === "rejected") return "rejected";
+  return "pending";
+}
+function showAdminReview(kind, id) {
+  const item = kind === "user" ? adminQueue.find((x) => x._kind === "user" && x.id === id) : adminQueue.find((x) => x._kind === "match" && x.id === id);
+  const placeholder = document.getElementById("review-placeholder");
+  const body = document.getElementById("review-body");
+  const title = document.getElementById("review-title");
+  if (!item) return;
+  if (placeholder) placeholder.hidden = true;
+  if (body) body.hidden = false;
+  const badge = document.getElementById("review-badge-wrap");
+  if (title) title.textContent = kind === "user" ? "用户审核" : "对接工单";
+  if (badge) badge.innerHTML = `<span class="${badgeClass(item._status)}">${badgeLabel(item._status)}</span>`;
+  const dl = document.getElementById("review-dl");
+  const rows = kind === "user" ? [
+    ["姓名", item.real_name], ["手机号", item.phone], ["校区", item.campus], ["届别", item.enroll_year],
+    ["院系", item.department], ["企业与职务", `${item.company || ""} · ${item.position || ""}`],
+    ["城市", item.city], ["校友卡编号", item.alumni_card_no], ["来源", item.referrer_source],
+    ["审核备注", item.audit_note || ""],
+  ] : [
+    ["商机", `#${item.demand_id}`], ["匹配分", `${item.match_score}%`],
+    ["状态", item.intent_status], ["说明", item.ai_reason], ["回馈承诺", item.voluntary_pledge || ""],
+  ];
+  if (dl) dl.innerHTML = rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("");
+  const actions = document.getElementById("review-actions");
+  if (!actions) return;
+  if (kind === "user" && item.role === "alumni") {
+    const pending = item.audit_status !== "approved";
+    actions.innerHTML = `
+      ${pending ? `<button class="dx-button" type="button" onclick="adminAuditUser(${item.id}, 'approve')">通过</button>
+        <button class="dx-button dx-button--secondary" type="button" onclick="adminAuditUser(${item.id}, 'reject')">驳回</button>` : `<button class="dx-button dx-button--secondary" type="button" onclick="adminAuditUser(${item.id}, 'reject')">设为待复核</button>`}
+      <button class="dx-button dx-button--text" type="button" onclick="adminResetPassword(${item.id})">重置密码</button>
+      <button class="dx-button dx-button--text" type="button" onclick="adminToggle('/api/admin/sponsor',{user_id:${item.id},sponsor:${!item.is_sponsor}})">${item.is_sponsor ? "取消赞助标记" : "标记为赞助校友"}</button>
+    `;
+  } else if (kind === "match") {
+    actions.innerHTML = `<button class="dx-button" type="button" onclick="adminToggle('/api/admin/match-success',{match_id:${item.id},success:${!item.is_success}})">${item.is_success ? "取消已撮合" : "标记已撮合"}</button>`;
+  } else actions.innerHTML = "";
+}
 async function loadAdminDashboard() {
   if (!isRealAdmin(currentUser)) {
-    document.getElementById("admin-users-list").textContent = "只有管理员可以查看审核队列。";
+    document.getElementById("admin-users-list").innerHTML = `<tr><td colspan="7">只有管理员可以查看审核队列。</td></tr>`;
     document.getElementById("admin-matches-list").textContent = "";
     return;
   }
   const res = await apiFetch("/api/admin/dashboard");
   const data = await res.json();
   if (!res.ok) {
-    document.getElementById("admin-users-list").textContent = data.detail || "只有管理员可以查看审核队列。";
+    document.getElementById("admin-users-list").innerHTML = `<tr><td colspan="7">${esc(data.detail || "只有管理员可以查看审核队列。")}</td></tr>`;
     document.getElementById("admin-matches-list").innerHTML = "";
     return;
   }
-
-  const usersBox = document.getElementById("admin-users-list");
-  usersBox.innerHTML = data.users
-    .map(
-      (u) => `
-      <div class="data-item-card" style="border-left:4px solid ${
-        u.audit_status === "pending" ? "#d97706" : "#0d9488"
-      }">
-        <div class="item-top-line">
-          <div>
-            <span class="item-name">${u.real_name}</span>${u.is_demo ? ' <span class="badge badge-lilac">演示</span>' : ' <span class="badge badge-gold">真实注册</span>'}
-            <span style="font-size:13px; color:var(--text-secondary); margin-left:8px;">
-              📱 ${u.phone} | ${u.campus} · ${u.enroll_year} · ${u.department}
-            </span>
-          </div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <span class="badge ${
-              u.audit_status === "approved" ? "badge-success" : "badge-warning"
-            }">
-              ${u.audit_status === "approved" ? "✅ 已审核通过" : "⏳ 待审核"}
-            </span>
-            <span class="badge ${u.profile_completed ? "badge-navy" : "badge-warning"}">
-              ${u.profile_completed ? "个人能力画像：已完善" : "个人能力画像：未填写"}
-            </span>
-          </div>
-        </div>
-        <div style="font-size:13px; color:var(--text-main); margin-bottom:6px;">
-          🏢 <strong>企业与职务：</strong>${u.company} · ${u.position}（${u.city}） |
-          🪪 <strong>官方校友卡凭证号：</strong><code>${u.alumni_card_no}</code> |
-          🔗 <strong>来源：</strong>${u.referrer_source}
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-          <span style="font-size:12.5px; color:var(--text-muted);">
-            审核备注：${u.audit_note || "等待管理员核验电子校友卡"}
-          </span>
-          <div style="display:flex; gap:8px;">
-            ${
-              u.role !== "alumni" ? "" : u.audit_status !== "approved"
-                ? `<button class="btn btn-sm btn-primary" onclick="adminAuditUser(${u.id}, 'approve')">✅ 审核通过（放行入驻）</button>`
-                : `<button class="btn btn-sm btn-outline" onclick="adminAuditUser(${u.id}, 'reject')">设为待复核</button>`
-            }
-            ${u.role === "alumni" ? `<button class="btn btn-sm ${u.is_sponsor ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/sponsor',{user_id:${u.id},sponsor:${!u.is_sponsor}})">${u.is_sponsor ? "🌸 赞助校友（点击取消）" : "标记为赞助校友"}</button>` : ""}
-          </div>
-        </div>
-      </div>
-    `
-    )
-    .join("");
-
-  const matchesBox = document.getElementById("admin-matches-list");
-  matchesBox.innerHTML = data.matches
-    .map(
-      (m) => `
-      <div class="data-item-card">
-        <div class="item-top-line">
-          <div>
-            <span class="badge badge-navy">商机ID #${m.demand_id}</span>
-            <span class="badge badge-gold">匹配分 ${m.match_score}%</span>
-            <span class="badge ${m.broker_assisted ? "badge-lilac" : "badge-success"}">
-              ${m.broker_assisted ? "🏅 委托中心节点人工深度撮合" : "🤝 双向匿名确认"}
-            </span>
-          </div>
-          <span><span class="badge badge-success">${m.intent_status}</span>
-          <button class="btn btn-sm ${m.is_success ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/match-success',{match_id:${m.id},success:${!m.is_success}})">${m.is_success ? "✅ 已对接成功（点击取消）" : "标记对接成功"}</button></span>
-        </div>
-        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:4px;">
-          ${m.ai_reason}
-        </div>
-        <div style="font-size:12.5px; color:var(--hit-blue); font-weight:600;">
-          🌸 自愿回馈承诺：${m.voluntary_pledge || "成交后自愿回馈平台长期建设"}
-        </div>
-      </div>
-    `
-    )
-    .join("");
+  const users = data.users || [];
+  const matches = data.matches || [];
+  adminQueue = users.map((u) => ({ ...u, _kind: "user", _status: statusOfUser(u) }));
+  const stats = document.getElementById("admin-stats");
+  if (stats) {
+    const pending = users.filter((u) => statusOfUser(u) === "pending").length;
+    const approved = users.filter((u) => statusOfUser(u) === "approved").length;
+    const rejected = users.filter((u) => statusOfUser(u) === "rejected").length;
+    stats.innerHTML = [
+      ["待审核", pending], ["已通过", approved], ["已驳回", rejected], ["对接工单", matches.length],
+    ].map(([label, n]) => `<div class="dx-stat-card"><div class="dx-stat-card__value">${n}</div><div class="dx-stat-card__label">${label}</div></div>`).join("");
+  }
+  document.getElementById("admin-users-list").innerHTML = users.map((u) => `
+    <tr>
+      <td>用户</td>
+      <td>${esc(u.real_name)}</td>
+      <td>${esc(u.real_name)}</td>
+      <td>${esc(u.campus)}</td>
+      <td>${esc((u.created_at || "").slice(0, 10))}</td>
+      <td><span class="${badgeClass(statusOfUser(u))}">${badgeLabel(statusOfUser(u))}</span></td>
+      <td><button class="dx-button dx-button--text" type="button" onclick="showAdminReview('user', ${u.id})">查看</button></td>
+    </tr>`).join("") || `<tr><td colspan="7">暂无记录</td></tr>`;
+  adminQueue.push(...matches.map((m) => ({ ...m, _kind: "match", _status: m.is_success ? "approved" : "pending" })));
+  document.getElementById("admin-matches-list").innerHTML = matches.length ? `<div class="dx-table-wrap"><table class="dx-table dx-table--compact">
+    <thead><tr><th>类型</th><th>名称 / 标题</th><th>提交人</th><th>校区</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>${matches.map((m) => `<tr>
+      <td>对接</td><td>商机 #${esc(m.demand_id)}</td><td>—</td><td>—</td><td></td>
+      <td><span class="${badgeClass(m.is_success ? "approved" : "pending")}">${m.is_success ? "已通过" : "待审核"}</span></td>
+      <td><button class="dx-button dx-button--text" type="button" onclick="showAdminReview('match', ${m.id})">查看</button></td>
+    </tr>`).join("")}</tbody></table></div>` : '<p class="dx-help">暂无对接工单</p>';
 }
 
 async function adminAuditUser(userId, action) {
+  const note = (document.getElementById("review-reason") || {}).value || "";
+  if (action === "reject" && !String(note).trim()) { showToast("请先填写驳回原因。"); return; }
   const res = await apiFetch("/api/admin/audit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, action: action }),
+    body: JSON.stringify({ user_id: userId, action: action, audit_note: note }),
   });
   const data = await res.json();
   if (res.ok) {
@@ -981,3 +922,170 @@ async function adminToggle(path, body) {
   showToast(r.ok ? d.message : (d.detail || "操作失败"));
   loadAdminDashboard();
 }
+
+async function sendSmsCode() {
+  const phone = document.getElementById("sms-phone").value.trim();
+  const error = document.getElementById("sms-phone-error");
+  if (!phoneOk(phone)) { setAlert("login-error", "请输入11位中国大陆手机号。"); document.getElementById("login-phone").focus(); return; }
+  setAlert("login-error", "");
+  const button = document.getElementById("sms-send");
+  setBusy(button, true, "获取验证码");
+  const res = await apiFetch("/api/auth/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) });
+  const data = await res.json();
+  setBusy(button, false, "获取验证码");
+  if (error) error.textContent = data.message || data.detail || "";
+}
+async function handleSmsLogin(e) {
+  e.preventDefault();
+  const phone = document.getElementById("sms-phone").value.trim();
+  const code = document.getElementById("sms-code").value.trim();
+  const error = document.getElementById("sms-phone-error");
+  if (!phoneOk(phone) || !/^\d{6}$/.test(code)) { setAlert("sms-phone-error", "请填写手机号和6位验证码。"); return; }
+  const button = document.getElementById("sms-submit");
+  setBusy(button, true, "用验证码登录");
+  const res = await apiFetch("/api/auth/sms/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, code }) });
+  const data = await res.json();
+  setBusy(button, false, "用验证码登录");
+  if (!res.ok) { setAlert("sms-phone-error", data.detail || "验证码不正确或已失效。"); return; }
+  setToken(data.token);
+  currentUser = data.user;
+  updateHeaderUserStatus();
+  switchView("workspace");
+}
+async function startWechatLogin() {
+  const res = await apiFetch("/api/auth/wechat/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "login" }) });
+  const data = await res.json();
+  const slot = document.getElementById("wechat-login-link");
+  if (!res.ok || !data.url) { if (slot) slot.textContent = "微信扫码登录：暂未开通"; return; }
+  if (slot) slot.innerHTML = `<a class="dx-button dx-button--secondary" href="${data.url}">前往微信扫码</a>`;
+}
+async function renderWechatBind() {
+  const box = document.getElementById("wechat-bind-box");
+  if (!box || !currentUser || currentUser.audit_status !== "approved") { if (box) box.innerHTML = ""; return; }
+  const bound = !!currentUser.wechat_bound;
+  const enabled = !!(window.__channelStatus && window.__channelStatus.wechat_website);
+  if (!enabled && !bound) {
+    box.innerHTML = `<button type="button" class="dx-button dx-button--secondary" id="wechat-bind-action" disabled>微信登录暂未开通</button>`;
+    return;
+  }
+  box.innerHTML = `<button type="button" class="dx-button dx-button--secondary" id="wechat-bind-action">${bound ? "解绑微信" : "绑定微信"}</button>`;
+  document.getElementById("wechat-bind-action").onclick = async () => {
+    if (bound) {
+      if (!confirm("确认解绑当前微信？")) return;
+      const res = await apiFetch("/api/auth/wechat/unbind", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+      const data = await res.json();
+      if (res.ok) { currentUser = data.user; renderWechatBind(); showToast("已解绑微信。"); }
+      else showToast(data.detail || "解绑没有完成。");
+      return;
+    }
+    const res = await apiFetch("/api/auth/wechat/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "bind" }) });
+    const data = await res.json();
+    if (res.ok && data.url) location.href = data.url;
+    else showToast(data.detail || "微信绑定暂未开通。");
+  };
+}
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const password = document.getElementById("new-password").value;
+  const error = document.getElementById("new-password-error");
+  if (!passwordAcceptable(password)) { setAlert("new-password-error", "请将密码设置为8到72位。"); return; }
+  setAlert("new-password-error", "");
+  const button = document.getElementById("change-password-submit");
+  setBusy(button, true, "保存新密码");
+  const res = await apiFetch("/api/auth/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_password: password }) });
+  const data = await res.json();
+  setBusy(button, false, "保存新密码");
+  if (!res.ok) { setAlert("new-password-error", data.detail || "密码没有更新。"); return; }
+  currentUser = data.user;
+  document.getElementById("password-change-box").hidden = true;
+  showToast("密码已更新。");
+}
+async function handleSettingsPassword(e) {
+  e.preventDefault();
+  const current = document.getElementById("current-password").value;
+  const password = document.getElementById("settings-new-password").value;
+  if (!current) { setAlert("settings-password-error", "请输入当前密码。"); return; }
+  if (!passwordAcceptable(password)) { setAlert("settings-password-error", "请将密码设置为8到72位。"); return; }
+  setAlert("settings-password-error", "");
+  const button = document.getElementById("settings-password-submit");
+  setBusy(button, true, "更新密码");
+  const res = await apiFetch("/api/auth/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current_password: current, new_password: password }) });
+  const data = await res.json();
+  setBusy(button, false, "更新密码");
+  if (!res.ok) { setAlert("settings-password-error", data.detail || "密码没有更新。"); return; }
+  currentUser = data.user;
+  document.getElementById("current-password").value = "";
+  document.getElementById("settings-new-password").value = "";
+  showToast("密码已更新。");
+}
+async function adminResetPassword(userId) {
+  if (!confirm("确认为该用户生成一次性临时密码？")) return;
+  const res = await apiFetch("/api/admin/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId }) });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.detail || "没有生成临时密码。"); return; }
+  showToast("临时密码只显示这一次，请当场交给用户。");
+  window.prompt("临时密码（关闭后不再显示）", data.temporary_password);
+}
+
+
+let currentDemandPane = 1;
+function showDemandPane(step) {
+  currentDemandPane = step;
+  [1, 2, 3, 4].forEach((n) => {
+    const pane = document.getElementById(`demand-pane-${n}`);
+    if (pane) pane.hidden = n !== step;
+    const item = document.querySelector(`[data-demand-step="${n}"]`);
+    if (item) {
+      item.classList.toggle("dx-stepper__item--current", n === step);
+      item.classList.toggle("dx-stepper__item--done", n < step);
+    }
+  });
+  const label = document.getElementById("demand-step-label");
+  if (label) label.textContent = `第 ${Math.min(step, 4)} 步，共 4 步`;
+  const prev = document.getElementById("demand-prev");
+  const next = document.getElementById("demand-next");
+  const submit = document.getElementById("demand-submit");
+  const actions = document.getElementById("demand-actions");
+  if (prev) prev.hidden = step === 1 || step === 4;
+  if (next) next.hidden = step >= 3;
+  if (submit) submit.hidden = step !== 3;
+  if (actions) actions.hidden = step === 4;
+  if (step === 3) fillDemandPreview();
+  if (step === 4) {
+    const after = document.getElementById("demand-success-copy");
+    if (after && !after.dataset.bound) {
+      after.dataset.bound = "1";
+    }
+  }
+}
+function fillDemandPreview() {
+  const box = document.getElementById("demand-preview");
+  if (!box) return;
+  const rows = [
+    ["类别", "dem-category"], ["行业", "dem-industry"], ["城市", "dem-city"],
+    ["标题", "dem-title"], ["描述", "dem-desc"], ["预算或规模", "dem-budget"],
+    ["期望合作对象", "dem-partner"], ["标签", "dem-tags"], ["回馈承诺", "dem-pledge"],
+  ];
+  box.innerHTML = "<dl>" + rows.map(([label, id]) => {
+    const el = document.getElementById(id);
+    return `<div><dt>${label}</dt><dd>${esc(el ? el.value : "")}</dd></div>`;
+  }).join("") + `<div><dt>人工撮合</dt><dd>${document.getElementById("dem-broker")?.checked ? "是" : "否"}</dd></div></dl>`;
+}
+function demandPaneValid(step) {
+  if (step === 1) return ["dem-category", "dem-industry", "dem-city"].every((id) => (document.getElementById(id)?.value || "").trim());
+  if (step === 2) {
+    const title = (document.getElementById("dem-title")?.value || "").trim();
+    const desc = (document.getElementById("dem-desc")?.value || "").trim();
+    return title.length >= 4 && desc.length >= 10;
+  }
+  return true;
+}
+function stepDemand(delta) {
+  const next = currentDemandPane + delta;
+  if (delta > 0 && !demandPaneValid(currentDemandPane)) {
+    showToast(currentDemandPane === 2 ? "请填写不少于4字的标题和不少于10字的描述。" : "请先完整选择类型、行业和城市。");
+    return;
+  }
+  if (next >= 1 && next <= 3) showDemandPane(next);
+}
+

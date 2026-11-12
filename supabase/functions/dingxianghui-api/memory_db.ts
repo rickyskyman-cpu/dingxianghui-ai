@@ -11,8 +11,14 @@ export class MemoryDb implements Db {
   matches: Row[] = [];
   snapshots: Row[] = [];
   throttles: { bucket: string; failures: number; window_started: number }[] = [];
+  smsCodes: Row[] = [];
+  wechatStates: Row[] = [];
+  audits: Row[] = [];
+  aiQuota: Row[] = [];
+  aiRuns: Row[] = [];
+  aiRankings: Row[] = [];
   queriesToday = 0;
-  private seq = { user: 1, demand: 1, match: 1, session: 1 };
+  private seq = { user: 1, demand: 1, match: 1, session: 1, sms: 1, run: 1 };
 
   constructor(seed?: { users?: Row[]; demands?: Row[]; matches?: Row[]; snapshots?: Row[] }) {
     this.users = seed?.users ? clone(seed.users) : [];
@@ -38,6 +44,9 @@ export class MemoryDb implements Db {
   }
   async deleteSession(tokenHash: string) {
     this.sessions = this.sessions.filter((s) => s.token_hash !== tokenHash);
+  }
+  async deleteSessionsForUser(userId: number, exceptTokenHash?: string) {
+    this.sessions = this.sessions.filter((s) => s.user_id !== userId || (exceptTokenHash && s.token_hash === exceptTokenHash));
   }
   async overview() {
     return {
@@ -67,6 +76,7 @@ export class MemoryDb implements Db {
     }
     m.is_success = ok;
     m.success_at = ok ? at : null;
+    if (ok) m.intent_status = "已撮合";
     return true;
   }
   async setSponsor(userId: number, on: boolean, demoOnly: boolean) {
@@ -193,5 +203,82 @@ export class MemoryDb implements Db {
   }
   async throttleClear(bucket: string) {
     this.throttles = this.throttles.filter((item) => item.bucket !== bucket);
+  }
+  async insertSmsCode(row: Row) {
+    const saved = { ...row, id: this.seq.sms++, attempts: 0, used_at: null };
+    this.smsCodes.push(saved);
+    return clone(saved);
+  }
+  async latestSmsCode(phoneHash: string) {
+    const rows = this.smsCodes.filter((item) => item.phone_hash === phoneHash).sort((a, b) => b.id - a.id);
+    return rows[0] ? clone(rows[0]) : null;
+  }
+  async markSmsUsed(id: number) {
+    const row = this.smsCodes.find((item) => item.id === id);
+    if (row) row.used_at = new Date().toISOString();
+  }
+  async addSmsAttempt(id: number) {
+    const row = this.smsCodes.find((item) => item.id === id);
+    if (!row) return 0;
+    row.attempts += 1;
+    return row.attempts;
+  }
+  async findUserByUnion(unionid: string) {
+    return clone(this.users.find((user) => user.wechat_unionid === unionid) || null);
+  }
+  async setWechat(userId: number, unionid: string | null, openid: string | null) {
+    const user = this.users.find((item) => item.id === userId);
+    if (!user) return null;
+    user.wechat_unionid = unionid;
+    user.wechat_openid = openid;
+    return clone(user);
+  }
+  async insertWechatState(row: Row) {
+    this.wechatStates.push({ ...row });
+  }
+  async consumeWechatState(stateHash: string) {
+    const row = this.wechatStates.find((item) => item.state_hash === stateHash);
+    if (!row || row.used_at || new Date(row.expires_at).getTime() <= Date.now()) return null;
+    row.used_at = new Date().toISOString();
+    return clone(row);
+  }
+  async setPasswordForce(userId: number, pwHash: string) {
+    const user = this.users.find((item) => item.id === userId);
+    if (!user) return null;
+    user.pw_hash = pwHash;
+    user.must_change_password = true;
+    return clone(user);
+  }
+  async clearPasswordForce(userId: number, pwHash: string) {
+    const user = this.users.find((item) => item.id === userId);
+    if (!user) return null;
+    user.pw_hash = pwHash;
+    user.must_change_password = false;
+    return clone(user);
+  }
+  async insertAudit(adminId: number, action: string, targetUserId: number) {
+    this.audits.push({ admin_id: adminId, action, target_user_id: targetUserId, created_at: new Date().toISOString() });
+  }
+  async consumeAiQuota(userId: number, day: string, limit: number) {
+    let row = this.aiQuota.find((item) => item.user_id === userId && item.day === day);
+    if (!row) {
+      row = { user_id: userId, day, used: 0 };
+      this.aiQuota.push(row);
+    }
+    if (row.used >= limit) return { allowed: false, count: row.used };
+    row.used += 1;
+    return { allowed: true, count: row.used };
+  }
+  async refundAiQuota(userId: number, day: string) {
+    const row = this.aiQuota.find((item) => item.user_id === userId && item.day === day);
+    if (row && row.used > 0) row.used -= 1;
+  }
+  async insertAiRun(row: Row) {
+    const saved = { ...row, id: this.seq.run++ };
+    this.aiRuns.push(saved);
+    return clone(saved);
+  }
+  async insertAiRanking(row: Row) {
+    this.aiRankings.push({ ...row });
   }
 }

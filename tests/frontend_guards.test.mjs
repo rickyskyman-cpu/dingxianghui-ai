@@ -13,7 +13,8 @@ test("public page does not offer the old demo entry", () => {
   assert.match(html, /校友自发交流平台，不是哈尔滨工业大学的官方网站/);
   assert.match(html, /丁香会-哈工大创业校友联合会/);
   assert.match(html, /汇聚资源/);
-  assert.match(html, /assets\/dx\/three-campuses\.svg/);
+  assert.match(html, /id="campus-orbital"/);
+  assert.doesNotMatch(html, /toggleVoiceRecording|SpeechRecognition|getUserMedia/);
   assert.doesNotMatch(html, /\.jpg/);
   assert.equal(html.includes("官方校徽"), false);
   const home = html.slice(html.indexOf('id="view-home"'), html.indexOf('id="view-feed"'));
