@@ -15,6 +15,14 @@ test("public page does not offer the old demo entry", () => {
   assert.match(html, /id="campus-orbital"/);
   assert.doesNotMatch(html, /不是哈尔滨工业大学的官方网站|不使用学校标志|不是地图|不是校徽|不是实景建筑|不是学校标志|非实际地图|不含真实卫星/);
   assert.doesNotMatch(html, /dx-disclaimer|dx-decor-band|texture-orbital/);
+  assert.match(html, /assets\/logo\/logo-mark\.svg/);
+  assert.match(html, /assets\/logo\/logo-mark-reverse\.svg/);
+  assert.match(html, /assets\/logo\/favicon\.svg/);
+  assert.match(html, /favicon-32\.png/);
+  assert.match(html, /favicon-180\.png/);
+  assert.match(html, /favicon\.ico/);
+  assert.doesNotMatch(html, /dx-brandmark"[^>]*>丁</);
+  assert.doesNotMatch(html, /brand-wordmark/);
   assert.doesNotMatch(html, /toggleVoiceRecording|SpeechRecognition|getUserMedia/);
   assert.doesNotMatch(html, /\.jpg/);
   assert.equal(html.includes("官方校徽"), false);
