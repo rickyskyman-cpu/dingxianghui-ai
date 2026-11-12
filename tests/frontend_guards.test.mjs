@@ -10,10 +10,11 @@ test("public page does not offer the old demo entry", () => {
   for (const token of ["demo2026", "demo-login", "self-approve", "switchDemoRole", "reg-is-demo", "quick-approve", "fuzzy-stats", "1380013800"]) {
     assert.equal(combined.includes(token), false, token);
   }
-  assert.match(html, /校友自发交流平台，不是哈尔滨工业大学的官方网站/);
   assert.match(html, /丁香会-哈工大创业校友联合会/);
-  assert.match(html, /汇聚资源/);
+  assert.match(html, /汇聚资源，共创未来/);
   assert.match(html, /id="campus-orbital"/);
+  assert.doesNotMatch(html, /不是哈尔滨工业大学的官方网站|不使用学校标志|不是地图|不是校徽|不是实景建筑|不是学校标志|非实际地图|不含真实卫星/);
+  assert.doesNotMatch(html, /dx-disclaimer|dx-decor-band|texture-orbital/);
   assert.doesNotMatch(html, /toggleVoiceRecording|SpeechRecognition|getUserMedia/);
   assert.doesNotMatch(html, /\.jpg/);
   assert.equal(html.includes("官方校徽"), false);
