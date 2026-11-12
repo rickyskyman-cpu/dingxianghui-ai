@@ -37,9 +37,8 @@
               <button class="dx-button dx-button--secondary" type="button" onclick="showRegister()">注册</button>
             </div>
           </div>
-          <figure class="schematic">
-            <img src="assets/dx/three-campuses.svg" alt="哈尔滨、威海、深圳三个节点的工程线稿，不是实景建筑，也不是官方标志" />
-            <figcaption>线稿表示三个校区之间的联系，不是地图，也不是校徽。</figcaption>
+          <figure class="schematic" id="campus-orbital" data-orbital-slot="pending">
+            <p class="schematic-slot">三区轨道示意图的位置已留出。新的设计文件到位后放在这里。这不是实景建筑，也不是学校标志。</p>
           </figure>
         </div>
       </div>
@@ -97,7 +96,7 @@
               </div>
               <div class="form-group">
                 <label class="form-label">手机号码（登录账号）*</label>
-                <input type="text" id="reg-phone" class="form-input" placeholder="如：13900008888" required />
+                <input type="text" id="reg-phone" class="form-input dx-input" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" aria-describedby="register-error" placeholder="如：13900008888" required />
               </div>
             </div>
 
@@ -182,12 +181,12 @@
               </div>
               <div class="form-group">
                 <label class="form-label">设置登录密码 *</label>
-                <input type="password" id="reg-pwd" class="form-input" minlength="8" placeholder="至少8位" autocomplete="new-password" required />
+                <input type="password" id="reg-pwd" class="form-input dx-input" maxlength="72" aria-describedby="register-error" minlength="8" placeholder="至少8位" autocomplete="new-password" required />
               </div>
             </div>
 
             <div style="display:flex; gap:12px; align-items:center; margin-top:8px;">
-              <button type="submit" class="btn btn-primary">提交注册</button>
+              <p id="register-error" class="dx-help" role="alert"></p><button type="submit" class="dx-button" id="register-submit">提交注册</button>
             </div>
           </form>
         </div>
@@ -204,14 +203,30 @@
             <form onsubmit="handleLoginSubmit(event)">
               <div class="form-group">
                 <label class="form-label">手机号码</label>
-                <input type="text" id="login-phone" class="form-input" inputmode="numeric" autocomplete="username" placeholder="注册时填写的手机号" required />
+                <input type="text" id="login-phone" class="form-input dx-input" type="tel" maxlength="11" aria-describedby="login-error" inputmode="numeric" autocomplete="username" placeholder="注册时填写的手机号" required />
               </div>
               <div class="form-group">
                 <label class="form-label">登录密码</label>
                 <input type="password" id="login-pwd" class="form-input" autocomplete="current-password" required />
               </div>
-              <button type="submit" class="btn btn-primary" style="width:100%;">登录</button>
+              <p id="login-error" class="dx-help" role="alert"></p>
+              <button type="submit" class="dx-button" id="login-submit">登录</button>
             </form>
+            <div class="alt-login" id="alt-login">
+              <h3 class="panel-title">其他登录方式</h3>
+              <p id="sms-login-note" class="dx-help">短信验证码登录：暂未开通</p>
+              <form id="sms-login-form" hidden onsubmit="handleSmsLogin(event)">
+                <label class="form-label" for="sms-phone">注册手机号</label>
+                <input id="sms-phone" class="form-input dx-input" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="11位手机号" />
+                <p id="sms-phone-error" class="dx-help" role="alert"></p>
+                <button class="dx-button dx-button--secondary" type="button" id="sms-send">获取验证码</button>
+                <label class="form-label" for="sms-code">验证码</label>
+                <input id="sms-code" class="form-input dx-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6位验证码" />
+                <button class="dx-button" type="submit" id="sms-submit">用验证码登录</button>
+              </form>
+              <p id="wechat-login-note" class="dx-help">微信扫码登录：暂未开通</p>
+              <p id="wechat-login-link"></p>
+            </div>
           </div>
 
         </div>
@@ -254,6 +269,15 @@
       </div>
 
       <!-- 状态3：已通过审核的工作台主体 -->
+      <div id="password-change-box" class="panel-card dx-panel" hidden>
+        <h2>请先修改临时密码</h2>
+        <form id="change-password-form" onsubmit="handleChangePassword(event)">
+          <label class="form-label" for="new-password">新密码</label>
+          <input id="new-password" class="form-input dx-input" type="password" minlength="8" maxlength="72" autocomplete="new-password" required />
+          <p id="new-password-error" class="dx-help" role="alert"></p>
+          <button class="dx-button" type="submit" id="change-password-submit">保存新密码</button>
+        </form>
+      </div>
       <div id="ws-approved-container" style="display:none;">
         <!-- 当前校友身份横幅 -->
         <div class="panel-card" style="margin-bottom:18px; background:linear-gradient(90deg, #0b2246 0%, #1d3f75 100%); color:#fff;">
@@ -280,8 +304,8 @@
             <div class="step-tab-left">
               <div class="step-circle">2</div>
               <div>
-                <div style="font-weight:800; color:var(--hit-navy);">第二步：提交项目合作需求（语音+AI）</div>
-                <div style="font-size:12px; color:var(--text-muted);">语音直说需求 · 后台AI自动转文字并提炼卡片</div>
+                <div style="font-weight:800; color:var(--hit-navy);">第二步：提交项目合作需求</div>
+                <div style="font-size:12px; color:var(--text-muted);">用文字填写需求，提交后生成匹配</div>
               </div>
             </div>
             <span class="badge badge-navy" id="step2-status-badge">🔒 需先完成第一步</span>
@@ -311,53 +335,13 @@
         <div id="ws-step-1-panel" class="panel-card">
           <div class="panel-header">
             <div>
-              <div class="panel-title">📋 第一步：个人与企业情况及核心能力画像（提需求前置必填）</div>
+              <div class="panel-title">第一步：个人与企业情况</div>
               <div class="panel-subtitle">
                 原则上要求注册校友先把自己的情况介绍清楚，这样您的能力既能进入全库供其他校友AI匹配，也能为您解锁【提交项目合作需求】权限。
               </div>
             </div>
-            <span class="badge badge-gold">支持语音直接录入 + AI自动提取</span>
+            <span class="badge">先填写，再提需求</span>
           </div>
-
-          <!-- 个人能力语音录入控制台 -->
-          <div class="voice-console-box">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong style="font-size:15px; color:#f6e05e;">🎙️ 语音直接介绍个人与企业情况（后台AI自动转文字并提炼能力字段）</strong>
-                <div style="font-size:12.5px; color:#cbd5e1;">
-                  您可以直接点击麦克风口述自己的届别、企业业务与核心能力，或点击右侧预设的校友语音示例立即体验后台AI解析：
-                </div>
-              </div>
-              <span class="badge badge-gold" id="profile-voice-status">AI语音引擎就绪</span>
-            </div>
-
-            <div class="voice-controls-row">
-              <button type="button" class="mic-record-btn" id="profile-mic-btn" onclick="toggleVoiceRecording('profile')">
-                🎙️ 点击开始麦克风录音介绍
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('profile', 'profile_sample_1')">
-                🔊 语音示例A：14级深圳计算机·工业3D视觉校友自述
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('profile', 'profile_sample_2')">
-                🔊 语音示例B：16级材料学院·碳纤维新材料校友自述
-              </button>
-            </div>
-
-            <div>
-              <textarea
-                id="profile-voice-raw"
-                class="form-textarea"
-                style="min-height:66px; background:rgba(255,255,255,0.95);"
-                placeholder="语音识别转写的文字内容将显示在这里（您也可以直接在此粘贴或输入一段口语自我介绍，然后点击下方【AI提取填充个人能力表单】）..."
-              ></textarea>
-              <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                <button type="button" class="btn btn-sm btn-gold" onclick="parseProfileFromTextarea()">
-                  ✨ 用后台AI将上方口述内容转换为结构化能力画像
-                </button>
-              </div>
-            </div>
-          </div>
-
           <!-- 个人情况结构化表单 -->
           <form onsubmit="handleSaveProfile(event)">
             <div class="form-group">
@@ -431,65 +415,14 @@
         <div id="ws-step-2-panel" class="panel-card" style="display:none;">
           <div class="panel-header">
             <div>
-              <div class="panel-title">🎙️ 第二步：提交项目合作需求（支持语音直接提交 · 后台AI自动转换文字与结构化需求）</div>
+              <div class="panel-title">第二步：提交合作需求</div>
               <div class="panel-subtitle">
-                直接口述您的项目合作痛点，后台AI自动将语音转换成文字需求内容并提炼结构化字段，提交后立即在系统全库中进行AI智能匹配。
+                填写合作需求。提交后在已审核的校友资料中生成匹配。
               </div>
             </div>
             <span class="badge badge-success">已通过个人能力前置校验</span>
           </div>
-
-          <!-- 项目需求语音直接录入控制台 -->
-          <div class="voice-console-box">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-              <div>
-                <strong style="font-size:15.5px; color:#f6e05e;">
-                  🎙️ 语音直接说需求（Web Speech 实时语音识别 + 录音上传后台 `/api/ai/voice-to-text` 智能解析）
-                </strong>
-                <div style="font-size:12.5px; color:#cbd5e1;">
-                  点击红色麦克风按钮直接说话，或点击下方 3 个真实校友语音示例按钮，观看后台 AI 如何秒级把语音转换成结构化需求卡片：
-                </div>
-              </div>
-              <span class="badge badge-gold" id="demand-voice-status">等待语音输入</span>
-            </div>
-
-            <div class="voice-controls-row">
-              <button type="button" class="mic-record-btn" id="demand-mic-btn" onclick="toggleVoiceRecording('demand')">
-                🎙️ 按下开始语音说需求
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('demand', 'demand_sample_1')">
-                🔊 语音示例1：寻找军工级碳纤维复合材料供应商
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('demand', 'demand_sample_2')">
-                🔊 语音示例2：工业视觉检测算法寻求产线落地场景
-              </button>
-              <button type="button" class="preset-voice-btn" onclick="runPresetVoice('demand', 'demand_sample_3')">
-                🔊 语音示例3：新能源储能项目海外渠道与欧盟合规合作
-              </button>
-            </div>
-
-            <div>
-              <label style="font-size:12px; color:#f6e05e; font-weight:700; display:block; margin-bottom:4px;">
-                📝 后台 AI 语音转文字原始记录（可自由修改补充，点击右侧按钮重新用AI提炼结构）：
-              </label>
-              <textarea
-                id="demand-voice-raw"
-                class="form-textarea"
-                style="min-height:74px; background:rgba(255,255,255,0.96);"
-                placeholder="点击上方麦克风录音或任一【语音示例】按钮，AI转写后的口语文字会呈现在此，并自动填充下方结构化项目需求表单..."
-              ></textarea>
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; flex-wrap:wrap; gap:8px;">
-                <span id="demand-ai-trace" style="font-size:12px; color:#cbd5e1;">
-                  引擎：HIT-DingXiangHui-Voice-NLP-v2.6（支持口语自动转标题/分类/预算/合作画像）
-                </span>
-                <button type="button" class="btn btn-sm btn-gold" onclick="parseDemandFromTextarea()">
-                  🤖 AI重新解析上方文字并填充下方需求卡片
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- AI转换后的结构化项目需求表单 -->
+          <!-- 结构化项目需求表单 -->
           <form onsubmit="handleCreateDemand(event)">
             <div class="form-grid-2">
               <div class="form-group">

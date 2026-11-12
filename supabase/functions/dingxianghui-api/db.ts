@@ -37,4 +37,18 @@ export interface Db {
   throttleBump(bucket: string, windowSeconds: number): Promise<number>;
   throttlePeek(bucket: string, windowSeconds: number): Promise<number>;
   throttleClear(bucket: string): Promise<void>;
+  insertSmsCode(row: Row): Promise<Row>;
+  latestSmsCode(phoneHash: string): Promise<Row | null>;
+  markSmsUsed(id: number): Promise<void>;
+  addSmsAttempt(id: number): Promise<number>;
+  findUserByUnion(unionid: string): Promise<Row | null>;
+  setWechat(userId: number, unionid: string | null, openid: string | null): Promise<Row | null>;
+  insertWechatState(row: Row): Promise<void>;
+  consumeWechatState(stateHash: string): Promise<Row | null>;
+  setPasswordForce(userId: number, pwHash: string): Promise<Row | null>;
+  clearPasswordForce(userId: number, pwHash: string): Promise<Row | null>;
+  insertAudit(adminId: number, action: string, targetUserId: number): Promise<void>;
+  consumeAiQuota(userId: number, day: string, limit: number): Promise<{ allowed: boolean; count: number }>;
+  insertAiRun(row: Row): Promise<Row>;
+  insertAiRanking(row: Row): Promise<void>;
 }

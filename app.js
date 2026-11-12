@@ -49,10 +49,6 @@ let currentUser = null;
 let currentView = "home";
 let currentWorkspaceStep = 1;
 let activeDemandIdForMatch = 1;
-let isRecordingVoice = false;
-let speechRecognitionInstance = null;
-let mediaRecorderInstance = null;
-let recordedAudioChunks = [];
 
 document.addEventListener("DOMContentLoaded", async () => {
   try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
@@ -159,16 +155,38 @@ async function loadInternalOverview() {
   } catch (e) { box.textContent = ""; }
 }
 
+function phoneOk(value) { return /^1\d{10}$/.test(String(value || "").trim()); }
+function setBusy(button, busy, label) {
+  if (!button) return;
+  button.disabled = busy;
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+  if (label) button.textContent = busy ? "处理中" : label;
+}
 async function loadChannelStatus() {
   const box = document.getElementById("channel-status");
-  if (!box) return;
   const r = await apiFetch("/api/auth/channels");
   const d = r.ok ? await r.json() : {};
-  if (d.wechat_website || d.wechat_mp || d.sms) {
-    box.textContent = "部分渠道已由服务器打开。这里不会显示二维码或验证码，也不会把绑定说成严格双因子。";
-    return;
+  if (box) box.textContent = d.sms || d.wechat_website ? "已开通的方式见下方。未开通的仍显示暂未开通，不能当作严格双因子。" : "微信扫码和短信验证码都未启用。";
+  const smsNote = document.getElementById("sms-login-note");
+  const smsForm = document.getElementById("sms-login-form");
+  if (smsNote && smsForm) {
+    smsNote.hidden = !!d.sms;
+    smsForm.hidden = !d.sms;
+    if (!d.sms) smsNote.textContent = "短信验证码登录：暂未开通";
   }
-  box.textContent = "微信扫码、微信内授权和短信都未启用。同时绑定也不等于每次登录都要再验一次，也不是严格双因子。";
+  const wxNote = document.getElementById("wechat-login-note");
+  const wxLink = document.getElementById("wechat-login-link");
+  if (wxNote && wxLink) {
+    wxNote.hidden = !!d.wechat_website;
+    wxLink.hidden = !d.wechat_website;
+    if (!d.wechat_website) wxNote.textContent = "微信扫码登录：暂未开通";
+  }
+  const send = document.getElementById("sms-send");
+  if (send && !send.dataset.bound) {
+    send.dataset.bound = "1";
+    send.addEventListener("click", sendSmsCode);
+  }
+  if (d.wechat_website) startWechatLogin();
 }
 
 function onAlumniCardSelected() {
@@ -279,25 +297,33 @@ async function handleRegisterSubmit(e) {
     password: document.getElementById("reg-pwd").value,
     is_demo: false,
   };
-  if (!passwordAcceptable(payload.password)) {
-    showToast("密码至少 8 位。");
+  const phoneError = document.getElementById("register-error");
+  if (!phoneOk(payload.phone)) {
+    if (phoneError) phoneError.textContent = "请输入11位中国大陆手机号。";
     return;
   }
-
+  if (!passwordAcceptable(payload.password)) {
+    if (phoneError) phoneError.textContent = "密码需为8到72位。";
+    return;
+  }
+  if (phoneError) phoneError.textContent = "";
+  const submit = document.getElementById("register-submit");
+  setBusy(submit, true, "提交注册");
   const res = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
+  setBusy(submit, false, "提交注册");
   if (!res.ok) {
-    showToast(`❌ 注册失败：${data.detail}`);
+    if (phoneError) phoneError.textContent = data.detail || "注册没有完成。";
     return;
   }
   setToken(data.token);
   currentUser = data.user;
   updateHeaderUserStatus();
-  showToast(`🎉 ${data.message}`);
+  showToast(data.message || "已提交，等待审核。");
   switchView("workspace");
 }
 
@@ -305,14 +331,20 @@ async function handleLoginSubmit(e) {
   e.preventDefault();
   const phone = document.getElementById("login-phone").value;
   const password = document.getElementById("login-pwd").value;
+  const error = document.getElementById("login-error");
+  if (!phoneOk(phone)) { if (error) error.textContent = "请输入11位中国大陆手机号。"; return; }
+  if (error) error.textContent = "";
+  const submit = document.getElementById("login-submit");
+  setBusy(submit, true, "登录");
   const res = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, password }),
   });
   const data = await res.json();
+  setBusy(submit, false, "登录");
   if (!res.ok) {
-    showToast(`❌ 登录失败：${data.detail}`);
+    if (error) error.textContent = data.detail || "登录没有完成。";
     return;
   }
   if (isDemoActor(data.user)) {
@@ -330,7 +362,7 @@ async function handleLoginSubmit(e) {
 }
 
 function passwordAcceptable(password) {
-  return typeof password === "string" && password.length >= 8 && password.length <= 200;
+  return typeof password === "string" && password.length >= 8 && password.length <= 72;
 }
 
 // ==================== VIEW 3: Personal Profile, Voice Demand Submission & AI Smart Matching ====================
@@ -365,6 +397,9 @@ async function renderWorkspaceView() {
     showToast("演示账号不能再进入。");
     return;
   }
+  const changeBox = document.getElementById("password-change-box");
+  if (changeBox) changeBox.hidden = !currentUser.must_change_password;
+  renderWechatBind();
 
   if (currentUser.audit_status !== "approved") {
     unauthBox.style.display = "none";
@@ -478,169 +513,6 @@ function selectWorkspaceStep(stepNum, skipGateAlert = false) {
   }
 }
 
-// ==================== Voice Input (Web Speech + MediaRecorder + AI Presets) ====================
-async function runPresetVoice(mode, presetKey) {
-  const statusBadge = document.getElementById(
-    mode === "profile" ? "profile-voice-status" : "demand-voice-status"
-  );
-  if (statusBadge) {
-    statusBadge.textContent = "🎙️ 正在接收语音并调用后台AI转写与提取...";
-  }
-
-  const res = await apiFetch("/api/ai/voice-to-text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: mode,
-      preset_key: presetKey,
-      user_city: currentUser?.city || "深圳",
-    }),
-  });
-  const data = await res.json();
-
-  if (mode === "profile") {
-    document.getElementById("profile-voice-raw").value = data.transcript;
-    applyExtractedProfile(data.extracted);
-    if (statusBadge) statusBadge.textContent = "✅ AI已完成语音转文字与能力字段提取";
-    showToast("🎙️ 后台AI已将校友语音自述转换为文字，并自动填好下方个人与企业能力画像表单！");
-  } else {
-    document.getElementById("demand-voice-raw").value = data.transcript;
-    applyExtractedDemand(data.structured);
-    if (statusBadge) statusBadge.textContent = `✅ AI已转写语音(${data.duration || "00:18"})并提炼结构化需求`;
-    showToast("🎙️ 后台AI已将语音转换为文字需求，并自动提炼出项目标题、类别、预算规模与合作标签！");
-  }
-}
-
-async function parseProfileFromTextarea() {
-  const raw = document.getElementById("profile-voice-raw").value.trim();
-  if (!raw) {
-    showToast("请先点击上方语音按钮录音/选择语音示例，或在文本框中输入口语自我介绍");
-    return;
-  }
-  const res = await apiFetch("/api/ai/voice-to-text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "profile", raw_text: raw }),
-  });
-  const data = await res.json();
-  applyExtractedProfile(data.extracted);
-  showToast("✨ 已根据您的口述内容自动提取并填充个人能力画像表单！");
-}
-
-function applyExtractedProfile(ext) {
-  if (!ext) return;
-  document.getElementById("prof-bio").value = ext.bio_detail || "";
-  document.getElementById("prof-capabilities").value = ext.core_capabilities || "";
-  document.getElementById("prof-provide-types").value = (ext.can_provide_types || []).join(", ");
-  document.getElementById("prof-industry-tags").value = (ext.industry_tags || []).join(", ");
-  document.getElementById("prof-coop-modes").value = ext.coop_modes || "";
-}
-
-async function parseDemandFromTextarea() {
-  const raw = document.getElementById("demand-voice-raw").value.trim();
-  if (!raw) {
-    showToast("请先录音、点击语音示例按钮，或在文本框中输入您的需求口述内容");
-    return;
-  }
-  const res = await apiFetch("/api/ai/voice-to-text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      mode: "demand",
-      raw_text: raw,
-      user_city: currentUser?.city || "深圳",
-    }),
-  });
-  const data = await res.json();
-  applyExtractedDemand(data.structured);
-  showToast("🤖 后台AI已将口述内容转换为结构化项目合作需求卡片！");
-}
-
-function applyExtractedDemand(st) {
-  if (!st) return;
-  document.getElementById("dem-title").value = st.title || "";
-  document.getElementById("dem-category").value = st.category || "找供应链/核心部件";
-  document.getElementById("dem-industry").value = st.industry || "具身智能";
-  document.getElementById("dem-city").value = st.city || currentUser?.city || "深圳";
-  document.getElementById("dem-desc").value = st.description || "";
-  document.getElementById("dem-budget").value = st.budget_scale || "";
-  document.getElementById("dem-partner").value = st.expected_partner || "";
-  document.getElementById("dem-tags").value = (st.tags || []).join(", ");
-}
-
-async function toggleVoiceRecording(mode) {
-  const btn = document.getElementById(mode === "profile" ? "profile-mic-btn" : "demand-mic-btn");
-  const statusBadge = document.getElementById(
-    mode === "profile" ? "profile-voice-status" : "demand-voice-status"
-  );
-  const rawBox = document.getElementById(
-    mode === "profile" ? "profile-voice-raw" : "demand-voice-raw"
-  );
-
-  if (isRecordingVoice) {
-    // Stop recording
-    isRecordingVoice = false;
-    btn.classList.remove("recording");
-    btn.innerHTML = mode === "profile" ? "🎙️ 点击开始麦克风录音介绍" : "🎙️ 按下开始语音说需求";
-    if (speechRecognitionInstance) {
-      try { speechRecognitionInstance.stop(); } catch (e) {}
-    }
-    if (mediaRecorderInstance && mediaRecorderInstance.state !== "inactive") {
-      try { mediaRecorderInstance.stop(); } catch (e) {}
-    }
-    if (statusBadge) statusBadge.textContent = "✅ 录音结束，正在由后台AI解析...";
-    if (rawBox.value.trim()) {
-      if (mode === "profile") {
-        await parseProfileFromTextarea();
-      } else {
-        await parseDemandFromTextarea();
-      }
-    }
-    return;
-  }
-
-  // Start recording
-  isRecordingVoice = true;
-  btn.classList.add("recording");
-  btn.innerHTML = "⏹️ 正在聆听您的语音...（点击结束并AI转写）";
-  if (statusBadge) statusBadge.textContent = "🔴 麦克风实时收音中...";
-
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    speechRecognitionInstance = new SpeechRecognition();
-    speechRecognitionInstance.lang = "zh-CN";
-    speechRecognitionInstance.continuous = true;
-    speechRecognitionInstance.interimResults = true;
-    speechRecognitionInstance.onresult = (event) => {
-      let transcript = "";
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      rawBox.value = transcript;
-    };
-    speechRecognitionInstance.onerror = () => {
-      // Fallback to realistic voice sample if no physical microphone in headless/server environment
-      isRecordingVoice = false;
-      btn.classList.remove("recording");
-      btn.innerHTML = mode === "profile" ? "🎙️ 点击开始麦克风录音介绍" : "🎙️ 按下开始语音说需求";
-      runPresetVoice(mode, mode === "profile" ? "profile_sample_1" : "demand_sample_1");
-    };
-    try {
-      speechRecognitionInstance.start();
-    } catch (e) {
-      runPresetVoice(mode, mode === "profile" ? "profile_sample_1" : "demand_sample_1");
-    }
-  } else {
-    // Browser doesn't expose Web Speech API or no mic attached -> automatically run realistic voice simulation after 1s
-    setTimeout(() => {
-      isRecordingVoice = false;
-      btn.classList.remove("recording");
-      btn.innerHTML = mode === "profile" ? "🎙️ 点击开始麦克风录音介绍" : "🎙️ 按下开始语音说需求";
-      runPresetVoice(mode, mode === "profile" ? "profile_sample_1" : "demand_sample_1");
-    }, 900);
-  }
-}
-
 // ==================== Step 1 Submit: Save Personal & Capability Profile ====================
 async function handleSaveProfile(e) {
   e.preventDefault();
@@ -705,7 +577,7 @@ async function handleCreateDemand(e) {
     budget_scale: document.getElementById("dem-budget").value,
     expected_partner: document.getElementById("dem-partner").value,
     tags: tags,
-    raw_voice_text: document.getElementById("demand-voice-raw").value,
+    raw_voice_text: "",
     need_manual_broker: document.getElementById("dem-broker").checked ? 1 : 0,
     voluntary_pledge: document.getElementById("dem-pledge").value,
   };
@@ -763,7 +635,7 @@ function renderMatchReportUI(demand, report) {
         ${
           demand.raw_voice_text
             ? `<div style="background:rgba(255,255,255,0.1); padding:8px 12px; border-radius:7px; font-size:12.5px; color:#f6e05e; margin-bottom:8px;">
-                🎙️ <strong>原始语音转写：</strong>“${demand.raw_voice_text}”
+                
               </div>`
             : ""
         }
@@ -921,7 +793,7 @@ async function loadAdminDashboard() {
           <div style="display:flex; gap:8px;">
             ${
               u.role !== "alumni" ? "" : u.audit_status !== "approved"
-                ? `<button class="btn btn-sm btn-primary" onclick="adminAuditUser(${u.id}, 'approve')">✅ 审核通过（放行入驻）</button>`
+                ? `<button class="btn btn-sm btn-primary" onclick="adminAuditUser(${u.id}, 'approve')">审核通过</button><button class="btn btn-sm btn-outline" type="button" onclick="adminResetPassword(${u.id})">重置密码</button>`
                 : `<button class="btn btn-sm btn-outline" onclick="adminAuditUser(${u.id}, 'reject')">设为待复核</button>`
             }
             ${u.role === "alumni" ? `<button class="btn btn-sm ${u.is_sponsor ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/sponsor',{user_id:${u.id},sponsor:${!u.is_sponsor}})">${u.is_sponsor ? "🌸 赞助校友（点击取消）" : "标记为赞助校友"}</button>` : ""}
@@ -946,7 +818,7 @@ async function loadAdminDashboard() {
             </span>
           </div>
           <span><span class="badge badge-success">${m.intent_status}</span>
-          <button class="btn btn-sm ${m.is_success ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/match-success',{match_id:${m.id},success:${!m.is_success}})">${m.is_success ? "✅ 已对接成功（点击取消）" : "标记对接成功"}</button></span>
+          <button class="btn btn-sm ${m.is_success ? "btn-primary" : "btn-outline"}" onclick="adminToggle('/api/admin/match-success',{match_id:${m.id},success:${!m.is_success}})">${m.is_success ? "✅ 已撮合（点击取消）" : "标记已撮合"}</button></span>
         </div>
         <div style="font-size:13px; color:var(--text-secondary); margin-bottom:4px;">
           ${m.ai_reason}
@@ -980,4 +852,84 @@ async function adminToggle(path, body) {
   const d = await r.json();
   showToast(r.ok ? d.message : (d.detail || "操作失败"));
   loadAdminDashboard();
+}
+
+async function sendSmsCode() {
+  const phone = document.getElementById("sms-phone").value.trim();
+  const error = document.getElementById("sms-phone-error");
+  if (!phoneOk(phone)) { if (error) error.textContent = "请输入11位中国大陆手机号。"; return; }
+  if (error) error.textContent = "";
+  const button = document.getElementById("sms-send");
+  setBusy(button, true, "获取验证码");
+  const res = await apiFetch("/api/auth/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) });
+  const data = await res.json();
+  setBusy(button, false, "获取验证码");
+  if (error) error.textContent = data.message || data.detail || "";
+}
+async function handleSmsLogin(e) {
+  e.preventDefault();
+  const phone = document.getElementById("sms-phone").value.trim();
+  const code = document.getElementById("sms-code").value.trim();
+  const error = document.getElementById("sms-phone-error");
+  if (!phoneOk(phone) || !/^\d{6}$/.test(code)) { if (error) error.textContent = "请填写手机号和6位验证码。"; return; }
+  const button = document.getElementById("sms-submit");
+  setBusy(button, true, "用验证码登录");
+  const res = await apiFetch("/api/auth/sms/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, code }) });
+  const data = await res.json();
+  setBusy(button, false, "用验证码登录");
+  if (!res.ok) { if (error) error.textContent = data.detail || "验证码不正确或已失效。"; return; }
+  setToken(data.token);
+  currentUser = data.user;
+  updateHeaderUserStatus();
+  switchView("workspace");
+}
+async function startWechatLogin() {
+  const res = await apiFetch("/api/auth/wechat/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "login" }) });
+  const data = await res.json();
+  const slot = document.getElementById("wechat-login-link");
+  if (!res.ok || !data.url) { if (slot) slot.textContent = "微信扫码登录：暂未开通"; return; }
+  if (slot) slot.innerHTML = `<a class="dx-button dx-button--secondary" href="${data.url}">前往微信扫码</a>`;
+}
+async function renderWechatBind() {
+  const box = document.getElementById("wechat-bind-box");
+  if (!box || !currentUser || currentUser.audit_status !== "approved") { if (box) box.innerHTML = ""; return; }
+  const bound = !!currentUser.wechat_bound;
+  box.innerHTML = `<button type="button" class="dx-button dx-button--secondary" id="wechat-bind-action">${bound ? "解绑微信" : "绑定微信"}</button>`;
+  document.getElementById("wechat-bind-action").onclick = async () => {
+    if (bound) {
+      if (!confirm("确认解绑当前微信？")) return;
+      const res = await apiFetch("/api/auth/wechat/unbind", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+      const data = await res.json();
+      if (res.ok) { currentUser = data.user; renderWechatBind(); showToast("已解绑微信。"); }
+      else showToast(data.detail || "解绑没有完成。");
+      return;
+    }
+    const res = await apiFetch("/api/auth/wechat/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purpose: "bind" }) });
+    const data = await res.json();
+    if (res.ok && data.url) location.href = data.url;
+    else showToast(data.detail || "微信绑定暂未开通。");
+  };
+}
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const password = document.getElementById("new-password").value;
+  const error = document.getElementById("new-password-error");
+  if (!passwordAcceptable(password)) { if (error) error.textContent = "密码需为8到72位。"; return; }
+  const button = document.getElementById("change-password-submit");
+  setBusy(button, true, "保存新密码");
+  const res = await apiFetch("/api/auth/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_password: password }) });
+  const data = await res.json();
+  setBusy(button, false, "保存新密码");
+  if (!res.ok) { if (error) error.textContent = data.detail || "密码没有更新。"; return; }
+  currentUser = data.user;
+  document.getElementById("password-change-box").hidden = true;
+  showToast("密码已更新。");
+}
+async function adminResetPassword(userId) {
+  if (!confirm("确认为该用户生成一次性临时密码？")) return;
+  const res = await apiFetch("/api/admin/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId }) });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.detail || "没有生成临时密码。"); return; }
+  showToast("临时密码只显示这一次，请当场交给用户。");
+  window.prompt("临时密码（关闭后不再显示）", data.temporary_password);
 }

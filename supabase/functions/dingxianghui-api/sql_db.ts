@@ -41,8 +41,8 @@ export function createSqlDb(sql: any): Db {
     },
     async markSuccess(matchId, ok, at, demoOnly) {
       const rows = demoOnly
-        ? await sql`update dxh.matches m set is_success=${ok}, success_at=${at} from dxh.demands d where m.id=${matchId} and d.id=m.demand_id and d.is_demo returning m.id`
-        : await sql`update dxh.matches set is_success=${ok}, success_at=${at} where id=${matchId} returning id`;
+        ? await sql`update dxh.matches m set is_success=${ok}, success_at=${at}, intent_status=case when ${ok} then '已撮合' else intent_status end from dxh.demands d where m.id=${matchId} and d.id=m.demand_id and d.is_demo returning m.id`
+        : await sql`update dxh.matches set is_success=${ok}, success_at=${at}, intent_status=case when ${ok} then '已撮合' else intent_status end where id=${matchId} returning id`;
       return rows.length > 0;
     },
     async setSponsor(userId, on, demoOnly) {
@@ -118,9 +118,9 @@ export function createSqlDb(sql: any): Db {
     },
     async insertMatch(row) {
       const [saved] = await sql`insert into dxh.matches(demand_id,request_user_id,target_type,target_id,match_score,ai_reason,complementarity,
-          suggested_action,intent_status,broker_assisted,voluntary_pledge,created_at)
+          suggested_action,intent_status,broker_assisted,voluntary_pledge,created_at,match_source,model_name,prompt_version)
         values(${row.demand_id},${row.request_user_id},${row.target_type},${row.target_id},${row.match_score},${row.ai_reason},${row.complementarity},
-          ${row.suggested_action},${row.intent_status},${row.broker_assisted},${row.voluntary_pledge},${row.created_at})
+          ${row.suggested_action},${row.intent_status},${row.broker_assisted},${row.voluntary_pledge},${row.created_at},${row.match_source || null},${row.model_name || null},${row.prompt_version || null})
         returning *`;
       return saved;
     },
@@ -181,6 +181,69 @@ export function createSqlDb(sql: any): Db {
     },
     async throttleClear(bucket) {
       await sql`delete from dxh.login_throttle where bucket=${bucket}`;
+    },
+    async insertSmsCode(row) {
+      const [saved] = await sql`insert into dxh.sms_codes(phone_hash, code_hash, expires_at)
+        values(${row.phone_hash},${row.code_hash},${row.expires_at}) returning *`;
+      return saved;
+    },
+    async latestSmsCode(phoneHash) {
+      const rows = await sql`select * from dxh.sms_codes where phone_hash=${phoneHash} order by id desc limit 1`;
+      return rows[0] || null;
+    },
+    async markSmsUsed(id) {
+      await sql`update dxh.sms_codes set used_at=now() where id=${id}`;
+    },
+    async addSmsAttempt(id) {
+      const [row] = await sql`update dxh.sms_codes set attempts=attempts+1 where id=${id} returning attempts`;
+      return Number(row?.attempts || 0);
+    },
+    async findUserByUnion(unionid) {
+      const rows = await sql`select * from dxh.users where wechat_unionid=${unionid}`;
+      return rows[0] || null;
+    },
+    async setWechat(userId, unionid, openid) {
+      const [user] = await sql`update dxh.users set wechat_unionid=${unionid}, wechat_openid=${openid} where id=${userId} returning *`;
+      return user || null;
+    },
+    async insertWechatState(row) {
+      await sql`insert into dxh.wechat_states(state_hash, purpose, user_id, expires_at)
+        values(${row.state_hash},${row.purpose},${row.user_id},${row.expires_at})`;
+    },
+    async consumeWechatState(stateHash) {
+      const [row] = await sql`update dxh.wechat_states set used_at=now()
+        where state_hash=${stateHash} and used_at is null and expires_at>now() returning *`;
+      return row || null;
+    },
+    async setPasswordForce(userId, pwHash) {
+      const [user] = await sql`update dxh.users set pw_hash=${pwHash}, must_change_password=true where id=${userId} returning *`;
+      return user || null;
+    },
+    async clearPasswordForce(userId, pwHash) {
+      const [user] = await sql`update dxh.users set pw_hash=${pwHash}, must_change_password=false where id=${userId} returning *`;
+      return user || null;
+    },
+    async insertAudit(adminId, action, targetUserId) {
+      await sql`insert into dxh.admin_audit(admin_id, action, target_user_id) values(${adminId},${action},${targetUserId})`;
+    },
+    async consumeAiQuota(userId, day, limit) {
+      const rows = await sql`insert into dxh.ai_quota(user_id, day, used) values(${userId},${day},1)
+        on conflict (user_id, day) do update set used = dxh.ai_quota.used + 1
+        where dxh.ai_quota.used < ${limit} returning used`;
+      if (!rows.length) {
+        const [current] = await sql`select used from dxh.ai_quota where user_id=${userId} and day=${day}`;
+        return { allowed: false, count: Number(current?.used || limit) };
+      }
+      return { allowed: true, count: Number(rows[0].used) };
+    },
+    async insertAiRun(row) {
+      const [saved] = await sql`insert into dxh.ai_runs(user_id, demand_id, model_name, prompt_version, source)
+        values(${row.user_id},${row.demand_id},${row.model_name},${row.prompt_version},${row.source}) returning *`;
+      return saved;
+    },
+    async insertAiRanking(row) {
+      await sql`insert into dxh.ai_rankings(run_id, demand_id, target_kind, target_id, score, reason)
+        values(${row.run_id},${row.demand_id},${row.target_kind},${row.target_id},${row.score},${row.reason})`;
     },
   };
 }
