@@ -52,6 +52,7 @@ let activeDemandIdForMatch = 1;
 
 document.addEventListener("DOMContentLoaded", async () => {
   try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  await consumeWechatCallback();
   if (getToken()) {
     const r = await apiFetch("/api/me");
     if (r.ok) {
@@ -65,6 +66,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   updateHeaderUserStatus();
   bindCounters();
+  await loadChannelStatus();
   if (location.search.includes("demo=")) {
     history.replaceState(null, "", location.pathname);
     showToast("演示入口已关闭。");
@@ -222,27 +224,77 @@ async function loadChannelStatus() {
   const box = document.getElementById("channel-status");
   const r = await apiFetch("/api/auth/channels");
   const d = r.ok ? await r.json() : {};
+  window.__channelStatus = d;
   if (box) box.textContent = d.sms || d.wechat_website ? "已开通的方式见下方。未开通的仍显示暂未开通，不能当作严格双因子。" : "微信扫码和短信验证码都未启用。";
   const smsNote = document.getElementById("sms-login-note");
   const smsForm = document.getElementById("sms-login-form");
+  const smsDisabled = document.getElementById("sms-login-disabled");
   if (smsNote && smsForm) {
     smsNote.hidden = !!d.sms;
     smsForm.hidden = !d.sms;
     if (!d.sms) smsNote.textContent = "短信验证码登录：暂未开通";
   }
+  if (smsDisabled) smsDisabled.hidden = !!d.sms;
   const wxNote = document.getElementById("wechat-login-note");
   const wxLink = document.getElementById("wechat-login-link");
+  const wxDisabled = document.getElementById("wechat-login-disabled");
   if (wxNote && wxLink) {
     wxNote.hidden = !!d.wechat_website;
     wxLink.hidden = !d.wechat_website;
     if (!d.wechat_website) wxNote.textContent = "微信扫码登录：暂未开通";
   }
+  if (wxDisabled) wxDisabled.hidden = !!d.wechat_website;
   const send = document.getElementById("sms-send");
   if (send && !send.dataset.bound) {
     send.dataset.bound = "1";
     send.addEventListener("click", sendSmsCode);
   }
   if (d.wechat_website) startWechatLogin();
+  if (currentUser) renderWechatBind();
+}
+
+function tidyAuthQuery() {
+  const params = new URLSearchParams(location.search);
+  ["code", "state", "error", "error_description", "wechat"].forEach((key) => params.delete(key));
+  const qs = params.toString();
+  const next = location.pathname + (qs ? `?${qs}` : "") + (location.hash && !location.hash.includes("dxh_") ? location.hash : "");
+  history.replaceState(null, "", next || location.pathname);
+}
+
+async function consumeWechatCallback() {
+  const params = new URLSearchParams(location.search);
+  const hash = new URLSearchParams((location.hash || "").replace(/^#/, "").replace(/&/g, "&"));
+  const hashToken = hash.get("dxh_session");
+  const wechatFlag = hash.get("dxh_wechat");
+  const code = params.get("code");
+  const state = params.get("state");
+  if (!hashToken && !wechatFlag && !code && !state && !params.get("error")) return;
+  const finish = (msg) => { tidyAuthQuery(); if (msg) showToast(msg); };
+  if (hashToken) {
+    setToken(hashToken);
+    finish("微信登录已完成。");
+    return;
+  }
+  if (wechatFlag === "bound") { finish("微信已绑定。"); return; }
+  if (wechatFlag === "error" || params.get("error")) { finish("微信登录没有完成。"); return; }
+  if (code && state) {
+    const res = await apiFetch("/api/auth/wechat/callback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, state }) });
+    const data = res.ok ? await res.json() : { detail: (await res.json().catch(() => ({}))).detail };
+    tidyAuthQuery();
+    if (!res.ok) { showToast(data.detail || "微信登录没有完成。"); return; }
+    if (data.token) {
+      setToken(data.token);
+      currentUser = data.user || currentUser;
+      showToast(data.message || "微信登录已完成。");
+      return;
+    }
+    if (data.bound && data.user) {
+      currentUser = data.user;
+      showToast("微信已绑定。");
+    }
+    return;
+  }
+  tidyAuthQuery();
 }
 
 function onAlumniCardSelected() {
@@ -911,6 +963,11 @@ async function renderWechatBind() {
   const box = document.getElementById("wechat-bind-box");
   if (!box || !currentUser || currentUser.audit_status !== "approved") { if (box) box.innerHTML = ""; return; }
   const bound = !!currentUser.wechat_bound;
+  const enabled = !!(window.__channelStatus && window.__channelStatus.wechat_website);
+  if (!enabled && !bound) {
+    box.innerHTML = `<button type="button" class="dx-button dx-button--secondary" id="wechat-bind-action" disabled>微信登录暂未开通</button>`;
+    return;
+  }
   box.innerHTML = `<button type="button" class="dx-button dx-button--secondary" id="wechat-bind-action">${bound ? "解绑微信" : "绑定微信"}</button>`;
   document.getElementById("wechat-bind-action").onclick = async () => {
     if (bound) {
@@ -941,6 +998,24 @@ async function handleChangePassword(e) {
   if (!res.ok) { setAlert("new-password-error", data.detail || "密码没有更新。"); return; }
   currentUser = data.user;
   document.getElementById("password-change-box").hidden = true;
+  showToast("密码已更新。");
+}
+async function handleSettingsPassword(e) {
+  e.preventDefault();
+  const current = document.getElementById("current-password").value;
+  const password = document.getElementById("settings-new-password").value;
+  if (!current) { setAlert("settings-password-error", "请输入当前密码。"); return; }
+  if (!passwordAcceptable(password)) { setAlert("settings-password-error", "请将密码设置为8到72位。"); return; }
+  setAlert("settings-password-error", "");
+  const button = document.getElementById("settings-password-submit");
+  setBusy(button, true, "更新密码");
+  const res = await apiFetch("/api/auth/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current_password: current, new_password: password }) });
+  const data = await res.json();
+  setBusy(button, false, "更新密码");
+  if (!res.ok) { setAlert("settings-password-error", data.detail || "密码没有更新。"); return; }
+  currentUser = data.user;
+  document.getElementById("current-password").value = "";
+  document.getElementById("settings-new-password").value = "";
   showToast("密码已更新。");
 }
 async function adminResetPassword(userId) {

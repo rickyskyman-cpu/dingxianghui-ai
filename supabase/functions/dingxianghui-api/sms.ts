@@ -119,4 +119,20 @@ async function sendTencent(cfg: SmsConfig, phone: string, code: string, fetchImp
     body: payload,
   });
   if (!res.ok) throw new Error("sms_provider_failed");
+  const data = await res.json().catch(() => ({}));
+  assertTencentSmsOk(data);
+}
+
+export function assertTencentSmsOk(data: any) {
+  const response = data?.Response || data || {};
+  if (response.Error && (response.Error.Code || response.Error.Message)) {
+    throw new Error("sms_provider_rejected");
+  }
+  const statuses = response.SendStatusSet;
+  if (Array.isArray(statuses) && statuses.some((item: any) => {
+    const code = String(item?.Code || "");
+    return code && code.toLowerCase() !== "ok";
+  })) {
+    throw new Error("sms_provider_rejected");
+  }
 }

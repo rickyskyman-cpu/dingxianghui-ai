@@ -50,6 +50,7 @@ export interface Db {
   clearPasswordForce(userId: number, pwHash: string): Promise<Row | null>;
   insertAudit(adminId: number, action: string, targetUserId: number): Promise<void>;
   consumeAiQuota(userId: number, day: string, limit: number): Promise<{ allowed: boolean; count: number }>;
+  refundAiQuota(userId: number, day: string): Promise<void>;
   insertAiRun(row: Row): Promise<Row>;
   insertAiRanking(row: Row): Promise<void>;
 }

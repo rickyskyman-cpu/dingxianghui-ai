@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { handle } from "../supabase/functions/dingxianghui-api/http.ts";
 import { hashPw } from "../supabase/functions/dingxianghui-api/crypto.ts";
 import { MemoryDb } from "../supabase/functions/dingxianghui-api/memory_db.ts";
-import { parseRankings } from "../supabase/functions/dingxianghui-api/deepseek.ts";
+import { maskFreeText, parseRankings } from "../supabase/functions/dingxianghui-api/deepseek.ts";
+import { assertTencentSmsOk } from "../supabase/functions/dingxianghui-api/sms.ts";
 
 const SMS = {
   SMS_PROVIDER: "aliyun",
@@ -117,12 +118,16 @@ test("deepseek rankings are validated and failures fall back without calling the
   const token = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000003", password: "TestUser12" } })).json()).token;
   const created = await call(db, "/api/demands", {
     method: "POST", token, env: { DEEPSEEK_API_KEY: "sk-test" }, fetchImpl,
-    body: { title: "寻找船舶配套", description: "需要海洋工程方向的配套能力", industry: "海洋工程", category: "找技术/联合研发", city: "威海" },
+    body: { title: "寻找船舶配套", description: "需要海洋工程方向的配套能力，备用 13900001111、user@example.com、110101199003078898", industry: "海洋工程", category: "找技术/联合研发", city: "威海" },
   });
   const body = await created.json();
   assert.equal(created.status, 200, JSON.stringify(body));
   assert.equal(body.match_source, "deepseek");
   assert.equal(seen.includes("13900000003"), false);
+  assert.equal(seen.includes("13900001111"), false);
+  assert.equal(seen.includes("user@example.com"), false);
+  assert.equal(seen.includes("110101199003078898"), false);
+  assert.equal(seen.includes("[已隐藏手机号]"), true);
   assert.equal(seen.includes("sk-test"), false);
   assert.equal(db.aiRankings.some((row) => row.target_id === 999), false);
   assert.equal(db.aiRankings.find((row) => row.target_id === 4).score, 100);
@@ -134,6 +139,35 @@ test("deepseek rankings are validated and failures fall back without calling the
   const fallbackBody = await fallback.json();
   assert.equal(fallback.status, 200);
   assert.equal(fallbackBody.match_source, "规则匹配");
+  assert.equal(db.aiQuota[0].used, 1);
+});
+
+test("free text and tencent sms errors are checked before use", () => {
+  const masked = maskFreeText("电话13900001111，邮箱user@example.com，证件110101199003078898");
+  assert.equal(masked.includes("13900001111"), false);
+  assert.equal(masked.includes("user@example.com"), false);
+  assert.equal(masked.includes("110101199003078898"), false);
+  assert.equal(masked.includes("[已隐藏手机号]"), true);
+  assert.equal(masked.includes("[已隐藏邮箱]"), true);
+  assert.equal(masked.includes("[已隐藏证件号]"), true);
+  assert.doesNotThrow(() => assertTencentSmsOk({ Response: { SendStatusSet: [{ Code: "Ok" }] } }));
+  assert.throws(() => assertTencentSmsOk({ Response: { Error: { Code: "AuthFailure", Message: "denied" } } }));
+  assert.throws(() => assertTencentSmsOk({ Response: { SendStatusSet: [{ Code: "FailedOperation.PhoneNumberFailed" }] } }));
+});
+
+test("wechat start rejects a return_to off the allowlist and get callback redirects", async () => {
+  const db = await seed();
+  db.users.find((user) => user.id === 3).wechat_unionid = "union-2";
+  const bad = await call(db, "/wechat/start", { method: "POST", env: WECHAT, body: { return_to: "https://evil.example/" } });
+  assert.equal(bad.status, 400);
+  const fetchImpl = (async () => new Response(JSON.stringify({ unionid: "union-2", openid: "open-2" }), { status: 200 })) as typeof fetch;
+  const start = await call(db, "/wechat/start", { method: "POST", env: WECHAT, body: {} });
+  const started = await start.json();
+  const bounced = await call(db, `/wechat/callback?code=code-2&state=${encodeURIComponent(started.state)}`, { env: WECHAT, fetchImpl });
+  assert.equal(bounced.status, 302);
+  const location = bounced.headers.get("location") || "";
+  assert.equal(location.startsWith("https://rickyskyman-cpu.github.io/dingxianghui-ai/"), true);
+  assert.equal(location.includes("#dxh_session="), true);
 });
 
 test("admin password reset is one-time and blocks other users", async () => {

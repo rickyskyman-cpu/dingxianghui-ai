@@ -1,8 +1,8 @@
 import { PRESETS, parseProfile, parseDemand, ocrCard, runMatching, maskCompany, maskPerson } from "./ai.ts";
 import { hashPw, verifyPw, sha256hex, newToken } from "./crypto.ts";
-import { completeJson, parseRankings, PROMPT_VERSION } from "./deepseek.ts";
+import { completeJson, maskFreeText, parseRankings, PROMPT_VERSION } from "./deepseek.ts";
 import { codeHash, phoneHash, randomCode, sendSms, smsConfig } from "./sms.ts";
-import { exchangeCode, randomState, startUrl, wechatConfig } from "./wechat.ts";
+import { exchangeCode, randomState, redirectAllowed, startUrl, wechatConfig } from "./wechat.ts";
 import type { Db, Row } from "./db.ts";
 
 type Any = any;
@@ -427,15 +427,34 @@ async function rankWithAi(db: Db, env: Record<string, string | undefined>, fetch
   if (!quota.allowed) return null;
   const candidates = candidatePayload(users, demands, need);
   const allowed = new Set(candidates.map((item) => item.id));
+  const safeNeed = {
+    title: maskFreeText(need.title),
+    description: maskFreeText(need.description),
+    industry: need.industry,
+    city: need.city,
+    tags: need.tags,
+    budget: maskFreeText(need.budget_scale),
+  };
+  const safeCandidates = candidates.map(({ overlap, ...item }) => ({
+    ...item,
+    capability: maskFreeText(item.capability),
+    title: maskFreeText(item.title),
+  }));
   const messages = [
     { role: "system", content: "只返回 JSON 对象 {\"rankings\":[{\"id\":\"u-1\",\"score\":80,\"reason\":\"一句中文理由\"}]}。不得输出手机号、证件号或真实姓名。" },
-    { role: "user", content: JSON.stringify({ need: { title: need.title, description: need.description, industry: need.industry, city: need.city, tags: need.tags, budget: need.budget_scale }, candidates: candidates.map(({ overlap, ...item }) => item) }) },
+    { role: "user", content: JSON.stringify({ need: safeNeed, candidates: safeCandidates }) },
   ];
   const done = await completeJson(env, messages, fetchImpl);
   console.log(JSON.stringify({ event: "ai_match", model: done?.model || env.DEEPSEEK_MODEL || "deepseek-chat", prompt_version: PROMPT_VERSION, candidates: candidates.length, ok: !!done }));
-  if (!done) return null;
+  if (!done) {
+    await db.refundAiQuota(u.id, new Date().toISOString().slice(0, 10));
+    return null;
+  }
   const rankings = parseRankings(done.text, allowed);
-  if (!rankings?.length) return null;
+  if (!rankings?.length) {
+    await db.refundAiQuota(u.id, new Date().toISOString().slice(0, 10));
+    return null;
+  }
   const run = await db.insertAiRun({ user_id: u.id, demand_id: need.id, model_name: done.model, prompt_version: PROMPT_VERSION, source: "deepseek" });
   const matched_alumni: Any[] = [];
   for (const item of rankings) {
@@ -454,7 +473,10 @@ async function rankWithAi(db: Db, env: Record<string, string | undefined>, fetch
       can_provide_types: J(person?.can_provide_types), is_demo: !!person?.is_demo,
     });
   }
-  if (!matched_alumni.length) return null;
+  if (!matched_alumni.length) {
+    await db.refundAiQuota(u.id, new Date().toISOString().slice(0, 10));
+    return null;
+  }
   return {
     model: done.model,
     report: {
@@ -524,6 +546,8 @@ async function smsVerify(db: Db, env: Record<string, string | undefined>, body: 
 async function wechatStart(db: Db, env: Record<string, string | undefined>, req: Request, body: Any) {
   const cfg = wechatConfig(env);
   if (!cfg) throw new HttpErr(404, "暂未开通");
+  const requested = String(body.redirect_uri || body.return_to || "");
+  if (requested && !redirectAllowed(cfg, requested)) throw new HttpErr(400, "回调地址不在允许名单");
   const purpose = body.purpose === "bind" ? "bind" : "login";
   let userId = null;
   if (purpose === "bind") {
@@ -641,13 +665,32 @@ export async function handle(req: Request, ctx: { db: Db; env?: Record<string, s
     let data: Any;
     if (M === "GET" && (path === "/" || path === "/api/health")) data = { ok: true, service: "dingxianghui-api" };
     else if (M === "GET" && path === "/api/public/overview") data = await overview(db);
-    else if (M === "GET" && path === "/api/auth/channels") data = channelStatus(env);
+    else if (M === "GET" && (path === "/api/auth/channels" || path === "/api/auth/options")) data = channelStatus(env);
     else if (M === "POST" && (path === "/api/auth/sms/send" || path === "/sms/send")) data = await smsSend(db, env, fetchImpl, req, body);
     else if (M === "POST" && (path === "/api/auth/sms/verify" || path === "/sms/verify")) data = await smsVerify(db, env, body);
     else if (M === "POST" && (path === "/api/auth/wechat/start" || path === "/wechat/start")) data = await wechatStart(db, env, req, body);
     else if ((M === "GET" || M === "POST") && (path === "/api/auth/wechat/callback" || path === "/wechat/callback")) {
       const params = M === "GET" ? Object.fromEntries(url.searchParams.entries()) : body;
       data = await wechatCallback(db, env, fetchImpl, params);
+      if (M === "GET") {
+        const cfg = wechatConfig(env);
+        const requested = String(params.return_to || params.redirect_uri || "");
+        const fallback = cfg && !/dingxianghui-api|\/functions\//.test(cfg.redirectUri) ? cfg.redirectUri : "";
+        const target = cfg && requested && redirectAllowed(cfg, requested)
+          ? requested
+          : (cfg && fallback && redirectAllowed(cfg, fallback) ? fallback : "");
+        if (target) {
+          const dest = new URL(target);
+          dest.hash = data?.token
+            ? `dxh_session=${encodeURIComponent(data.token)}`
+            : data?.bound
+              ? "dxh_wechat=bound"
+              : "dxh_wechat=ok";
+          const redirectHeaders = { ...headers, location: dest.toString() };
+          delete redirectHeaders["content-type"];
+          return new Response(null, { status: 302, headers: redirectHeaders });
+        }
+      }
     }
     else if (M === "POST" && path === "/api/auth/wechat/unbind") data = await wechatUnbind(db, env, req, body);
     else if (M === "POST" && path === "/api/auth/change-password") data = await changePassword(db, req, env, body);

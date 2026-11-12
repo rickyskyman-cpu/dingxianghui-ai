@@ -1,5 +1,16 @@
 export const PROMPT_VERSION = "dxh-match-v1";
 
+/** Mask phones, mainland ID numbers, and emails in free text before model calls. */
+export function maskFreeText(value: unknown): string {
+  let s = String(value ?? "");
+  s = s.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[已隐藏邮箱]");
+  s = s.replace(/\b[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/g, "[已隐藏证件号]");
+  s = s.replace(/\b[1-9]\d{7}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}\b/g, "[已隐藏证件号]");
+  s = s.replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, "[已隐藏手机号]");
+  s = s.replace(/(?<!\d)1[3-9]\d{1}[-\s]\d{4}[-\s]\d{4}(?!\d)/g, "[已隐藏手机号]");
+  return s;
+}
+
 export function extractJson(text: string) {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = (fenced ? fenced[1] : text).trim();

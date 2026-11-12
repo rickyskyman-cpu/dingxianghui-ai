@@ -269,6 +269,10 @@ export class MemoryDb implements Db {
     row.used += 1;
     return { allowed: true, count: row.used };
   }
+  async refundAiQuota(userId: number, day: string) {
+    const row = this.aiQuota.find((item) => item.user_id === userId && item.day === day);
+    if (row && row.used > 0) row.used -= 1;
+  }
   async insertAiRun(row: Row) {
     const saved = { ...row, id: this.seq.run++ };
     this.aiRuns.push(saved);

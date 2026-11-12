@@ -240,6 +240,9 @@ export function createSqlDb(sql: any): Db {
       }
       return { allowed: true, count: Number(rows[0].used) };
     },
+    async refundAiQuota(userId, day) {
+      await sql`update dxh.ai_quota set used = used - 1 where user_id=${userId} and day=${day} and used > 0`;
+    },
     async insertAiRun(row) {
       const [saved] = await sql`insert into dxh.ai_runs(user_id, demand_id, model_name, prompt_version, source)
         values(${row.user_id},${row.demand_id},${row.model_name},${row.prompt_version},${row.source}) returning *`;
