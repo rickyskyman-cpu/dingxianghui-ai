@@ -17,6 +17,10 @@ export function createSqlDb(sql: any): Db {
     async deleteSession(tokenHash) {
       await sql`delete from dxh.sessions where token_hash=${tokenHash}`;
     },
+    async deleteSessionsForUser(userId, exceptTokenHash) {
+      if (exceptTokenHash) await sql`delete from dxh.sessions where user_id=${userId} and token_hash<>${exceptTokenHash}`;
+      else await sql`delete from dxh.sessions where user_id=${userId}`;
+    },
     async overview() {
       const [r] = await sql`select
         (select count(*)::int from dxh.users where role='alumni' and audit_status='approved') alumni,

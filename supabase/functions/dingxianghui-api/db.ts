@@ -5,6 +5,7 @@ export interface Db {
   insertSession(tokenHash: string, userId: number, days: number): Promise<void>;
   userBySession(tokenHash: string): Promise<Row | null>;
   deleteSession(tokenHash: string): Promise<void>;
+  deleteSessionsForUser(userId: number, exceptTokenHash?: string): Promise<void>;
   overview(): Promise<{ alumni: number; demands: number; queries_today: number; successes: number; sponsors: number }>;
   bumpQuery(): Promise<void>;
   usersBrief(): Promise<Row[]>;

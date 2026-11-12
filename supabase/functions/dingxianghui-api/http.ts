@@ -575,7 +575,13 @@ async function changePassword(db: Db, req: Request, env: Record<string, string |
   const user = await authUser(req, db, env);
   const password = String(body.new_password ?? "");
   if (password.length < 8 || password.length > 72) throw new HttpErr(400, "登录密码需为 8-72 位");
+  if (!user.must_change_password) {
+    const current = String(body.current_password ?? "");
+    if (!current || !(await verifyPw(current, user.pw_hash))) throw new HttpErr(401, "当前密码不正确");
+  }
   const next = await db.clearPasswordForce(user.id, await hashPw(password));
+  const auth = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
+  await db.deleteSessionsForUser(user.id, auth ? await sha256hex(auth[1].trim()) : "");
   return { message: "密码已更新", user: privateUser(next) };
 }
 
@@ -588,6 +594,7 @@ async function adminResetPassword(db: Db, env: Record<string, string | undefined
   const bytes = crypto.getRandomValues(new Uint8Array(12));
   const temporary = [...bytes].map((item) => alphabet[item % alphabet.length]).join("");
   await db.setPasswordForce(target.id, await hashPw(temporary));
+  await db.deleteSessionsForUser(target.id);
   await db.insertAudit(admin.id, "reset_password", target.id);
   return { user_id: target.id, temporary_password: temporary, must_change_password: true };
 }
@@ -664,8 +671,13 @@ export async function handle(req: Request, ctx: { db: Db; env?: Record<string, s
       requireApproved(user);
       const row = await db.demandById(id);
       if (!row || row.user_id !== user.id) throw new HttpErr(404, "未找到该商机需求");
+      if (isDemoActor(user) && !row.is_demo) throw new HttpErr(404, "未找到该商机需求");
       let users = await db.approvedUsers();
       let all = await db.allDemands();
+      if (isDemoActor(user)) {
+        users = users.filter((x) => x.is_demo);
+        all = all.filter((x) => x.is_demo);
+      }
       const ai = await rankWithAi(db, env, fetchImpl, user, row, users, all);
       const report = ai?.report || runMatching(row, users, all);
       data = { match_source: ai ? "deepseek" : "规则匹配", match_report: report };

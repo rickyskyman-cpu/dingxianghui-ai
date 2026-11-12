@@ -77,3 +77,16 @@ revoke all on table dxh.admin_audit from public, anon, authenticated;
 revoke all on table dxh.ai_quota from public, anon, authenticated;
 revoke all on table dxh.ai_runs from public, anon, authenticated;
 revoke all on table dxh.ai_rankings from public, anon, authenticated;
+
+create unique index if not exists dxh_users_wechat_unionid_uidx on dxh.users (wechat_unionid) where wechat_unionid is not null;
+
+do $$
+declare seq text;
+begin
+  foreach seq in array array['dxh.sms_codes','dxh.admin_audit','dxh.ai_runs','dxh.ai_rankings']
+  loop
+    if pg_get_serial_sequence(seq, 'id') is not null then
+      execute format('revoke all on sequence %s from public, anon, authenticated', pg_get_serial_sequence(seq, 'id'));
+    end if;
+  end loop;
+end$$;

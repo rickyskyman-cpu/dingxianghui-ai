@@ -45,6 +45,9 @@ export class MemoryDb implements Db {
   async deleteSession(tokenHash: string) {
     this.sessions = this.sessions.filter((s) => s.token_hash !== tokenHash);
   }
+  async deleteSessionsForUser(userId: number, exceptTokenHash?: string) {
+    this.sessions = this.sessions.filter((s) => s.user_id !== userId || (exceptTokenHash && s.token_hash === exceptTokenHash));
+  }
   async overview() {
     return {
       alumni: this.users.filter((u) => u.role === "alumni" && u.audit_status === "approved").length,

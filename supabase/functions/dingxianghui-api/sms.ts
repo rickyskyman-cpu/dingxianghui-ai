@@ -10,8 +10,8 @@ export type SmsConfig = {
 
 export function smsConfig(env: Record<string, string | undefined>): SmsConfig | null {
   const provider = env.SMS_PROVIDER === "tencent" ? "tencent" : env.SMS_PROVIDER === "aliyun" ? "aliyun" : "";
-  const signName = env.SMS_SIGN_NAME || env.SIGN_NAME || "";
-  const templateCode = env.SMS_TEMPLATE_CODE || env.TEMPLATE_CODE || "";
+  const signName = env.SMS_SIGN_NAME || "";
+  const templateCode = env.SMS_TEMPLATE_CODE || "";
   const pepper = env.SMS_CODE_PEPPER || "";
   const accessKeyId = provider === "tencent" ? (env.SMS_SECRET_ID || "") : (env.SMS_ACCESS_KEY_ID || "");
   const accessKeySecret = provider === "tencent" ? (env.SMS_SECRET_KEY || "") : (env.SMS_ACCESS_KEY_SECRET || "");

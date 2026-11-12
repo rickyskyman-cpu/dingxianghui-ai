@@ -143,11 +143,15 @@ test("admin password reset is one-time and blocks other users", async () => {
   const pendingToken = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000002", password: "TestUser12" } })).json()).token;
   const pending = await call(db, "/api/admin/reset-password", { method: "POST", token: pendingToken, body: { user_id: 3 } });
   assert.equal(pending.status, 403);
+  const prior = await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000003", password: "TestUser12" } });
+  const priorToken = (await prior.json()).token;
   const adminToken = (await (await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000001", password: "TestAdmin1" } })).json()).token;
   const reset = await call(db, "/api/admin/reset-password", { method: "POST", token: adminToken, body: { user_id: 3 } });
   const resetBody = await reset.json();
   assert.equal(reset.status, 200);
   assert.equal(db.audits.some((row) => String(row.action).includes(resetBody.temporary_password)), false);
+  const stale = await call(db, "/api/feed", { token: priorToken });
+  assert.equal(stale.status, 401, "old token after reset");
   const login = await call(db, "/api/auth/login", { method: "POST", body: { phone: "13900000003", password: resetBody.temporary_password } });
   const session = await login.json();
   assert.equal(session.user.must_change_password, true);
