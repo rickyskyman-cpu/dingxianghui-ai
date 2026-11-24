@@ -1,7 +1,31 @@
 import type { Db, Row } from "./db.ts";
 
 // Every statement is limited to schema dxh. This file does not read or write other schemas.
-export function createSqlDb(sql: any): Db {
+
+function isIdKey(key: string) {
+  return key === "id" || key === "user_a" || key === "user_b" || key.endsWith("_id");
+}
+
+export function normalizeSqlRows(result: any) {
+  if (!Array.isArray(result)) return result;
+  for (const row of result) {
+    if (!row || typeof row !== "object") continue;
+    for (const key of Object.keys(row)) {
+      const value = row[key];
+      if (!isIdKey(key) || value == null || value === "") continue;
+      if (typeof value === "number" && Number.isSafeInteger(value)) continue;
+      if (typeof value === "string" && /^-?\d+$/.test(value)) {
+        const parsed = Number(value);
+        if (Number.isSafeInteger(parsed)) row[key] = parsed;
+      }
+    }
+  }
+  return result;
+}
+
+export function createSqlDb(rawSql: any): Db {
+  const sql = (strings: TemplateStringsArray, ...values: unknown[]) =>
+    Promise.resolve(rawSql(strings, ...values)).then(normalizeSqlRows);
   return {
     async purgeExpiredSessions() {
       await sql`delete from dxh.sessions where expires_at < now()`;
@@ -95,7 +119,10 @@ export function createSqlDb(sql: any): Db {
     async updateProfile(userId, fields) {
       const [x] = await sql`update dxh.users set bio_detail=${fields.bio_detail}, core_capabilities=${fields.core_capabilities},
           can_provide_types=${fields.can_provide_types}, industry_tags=${fields.industry_tags},
-          coop_modes=${fields.coop_modes}, profile_completed=1 where id=${userId} returning *`;
+          coop_modes=${fields.coop_modes}, company=${fields.company}, position=${fields.position},
+          city=${fields.city}, campus=${fields.campus}, enroll_year=${fields.enroll_year}, department=${fields.department},
+          seeking=${fields.seeking}, openness=${fields.openness}, profile_updated_at=${fields.profile_updated_at},
+          profile_completed=1 where id=${userId} returning *`;
       return x;
     },
     async recentDemandCount(userId, _sinceMs) {
@@ -164,7 +191,9 @@ export function createSqlDb(sql: any): Db {
       return t || null;
     },
     async setAudit(id, status, note) {
-      const [x] = await sql`update dxh.users set audit_status=${status}, audit_note=${note} where id=${id} returning *`;
+      const [x] = await sql`update dxh.users set audit_status=${status}, audit_note=${note},
+          approved_at = case when ${status} = 'approved' and approved_at is null then now() else approved_at end
+          where id=${id} returning *`;
       return x || null;
     },
     async throttleBump(bucket, windowSeconds) {
@@ -258,6 +287,157 @@ export function createSqlDb(sql: any): Db {
     async insertAiRanking(row) {
       await sql`insert into dxh.ai_rankings(run_id, demand_id, target_kind, target_id, score, reason)
         values(${row.run_id},${row.demand_id},${row.target_kind},${row.target_id},${row.score},${row.reason})`;
+    },
+    async updateDemand(id, userId, fields) {
+      const [saved] = await sql`update dxh.demands set title=${fields.title}, category=${fields.category}, industry=${fields.industry},
+          city=${fields.city}, description=${fields.description}, budget_scale=${fields.budget_scale},
+          expected_partner=${fields.expected_partner}, tags=${fields.tags}, updated_at=${fields.updated_at},
+          lifecycle=coalesce(${fields.lifecycle ?? null}, lifecycle),
+          archived_at=coalesce(${fields.archived_at ?? null}, archived_at)
+          where id=${id} and user_id=${userId} returning *`;
+      return saved || null;
+    },
+    async setDemandLifecycle(id, userId, lifecycle, at) {
+      const [saved] = await sql`update dxh.demands set lifecycle=${lifecycle}, updated_at=${at}
+          where id=${id} and user_id=${userId} and lifecycle is distinct from '已归档' returning *`;
+      return saved || null;
+    },
+    async countAudience(audience, campus) {
+      const [{ n }] = await sql`select count(*)::int n from dxh.users
+          where role='alumni' and is_demo is not true and audit_status='approved'
+          and (
+            ${audience} = 'all_registered'
+            or ${audience} = 'approved'
+            or (${audience} = 'campus' and campus=${campus})
+          )`;
+      return n;
+    },
+    async upsertConversation(row) {
+      const [saved] = await sql`insert into dxh.conversations(user_a, user_b, demand_id, context_summary, last_message_at)
+          values(${row.user_a},${row.user_b},${row.demand_id},${row.context_summary || ""},${row.last_message_at})
+          on conflict (user_a, user_b) do update set
+            demand_id = coalesce(excluded.demand_id, dxh.conversations.demand_id),
+            context_summary = case when excluded.context_summary <> '' then excluded.context_summary else dxh.conversations.context_summary end,
+            last_message_at = excluded.last_message_at
+          returning *`;
+      return saved;
+    },
+    async conversationsFor(userId) {
+      return await sql`select * from dxh.conversations where user_a=${userId} or user_b=${userId} order by last_message_at desc nulls last, id desc`;
+    },
+    async conversationById(id) {
+      const rows = await sql`select * from dxh.conversations where id=${id}`;
+      return rows[0] || null;
+    },
+    async messagesFor(conversationIds) {
+      if (!conversationIds.length) return [];
+      return await sql`select * from dxh.direct_messages where conversation_id = any(${conversationIds}) order by id asc`;
+    },
+    async insertDirectMessage(row) {
+      const [saved] = await sql`insert into dxh.direct_messages(conversation_id, sender_id, body, demand_id, context_summary, created_at)
+          values(${row.conversation_id},${row.sender_id},${row.body},${row.demand_id},${row.context_summary || ""},${row.created_at})
+          returning *`;
+      return saved;
+    },
+    async markConversationRead(conversationId, readerId, at) {
+      await sql`update dxh.direct_messages set read_at=${at}
+          where conversation_id=${conversationId} and sender_id<>${readerId} and read_at is null`;
+    },
+    async listAnnouncements() {
+      return await sql`select * from dxh.announcements order by id desc`;
+    },
+    async insertAnnouncement(row) {
+      const [saved] = await sql`insert into dxh.announcements(title, body, category, audience, campus, admin_id, covered_count, created_at)
+          values(${row.title},${row.body},${row.category},${row.audience},${row.campus || ""},${row.admin_id},${row.covered_count},${row.created_at})
+          returning *`;
+      return saved;
+    },
+    async revokeAnnouncement(id, at) {
+      const [saved] = await sql`update dxh.announcements set revoked_at=${at} where id=${id} returning *`;
+      return saved || null;
+    },
+    async announcementReadsFor(userId) {
+      return await sql`select * from dxh.announcement_reads where user_id=${userId}`;
+    },
+    async readCounts() {
+      return await sql`select announcement_id, count(*)::int as read_count from dxh.announcement_reads group by announcement_id`;
+    },
+    async markAnnouncementRead(announcementId, userId, at) {
+      await sql`insert into dxh.announcement_reads(announcement_id, user_id, read_at)
+          values(${announcementId},${userId},${at})
+          on conflict (announcement_id, user_id) do nothing`;
+    },
+    async noticesFor(userId) {
+      return await sql`select * from dxh.official_notices where user_id=${userId} order by id desc`;
+    },
+    async insertNotice(row) {
+      const [saved] = await sql`insert into dxh.official_notices(user_id, title, body, category, ref_type, ref_id, created_at)
+          values(${row.user_id},${row.title},${row.body},${row.category},${row.ref_type || null},${row.ref_id || null},${row.created_at})
+          returning *`;
+      return saved;
+    },
+    async markNoticeRead(id, userId, at) {
+      const rows = await sql`update dxh.official_notices set read_at=coalesce(read_at, ${at}::timestamptz) where id=${id} and user_id=${userId} returning id`;
+      return rows.length > 0;
+    },
+    async markAllNoticesRead(userId, at) {
+      await sql`update dxh.official_notices set read_at=${at} where user_id=${userId} and read_at is null`;
+    },
+    async listAssists() {
+      return await sql`select * from dxh.assist_requests order by id desc`;
+    },
+    async assistById(id) {
+      const rows = await sql`select * from dxh.assist_requests where id=${id}`;
+      return rows[0] || null;
+    },
+    async insertAssist(row) {
+      const [saved] = await sql`insert into dxh.assist_requests(requester_id, target_user_id, demand_id, appeal, help_needed, contact_time, note, urgency, status, internal_memo, created_at, updated_at)
+          values(${row.requester_id},${row.target_user_id},${row.demand_id},${row.appeal},${row.help_needed},${row.contact_time},${row.note},${row.urgency},${row.status},${row.internal_memo},${row.created_at},${row.updated_at})
+          returning *`;
+      return saved;
+    },
+    async updateAssist(id, fields) {
+      const current = await this.assistById(id);
+      if (!current) return null;
+      const next = { ...current, ...fields };
+      const [saved] = await sql`update dxh.assist_requests set status=${next.status}, internal_memo=${next.internal_memo || ""},
+          note=${next.note || ""}, updated_at=${next.updated_at} where id=${id} returning *`;
+      return saved || null;
+    },
+    async listAssistUpdates(requestId) {
+      return await sql`select * from dxh.assist_updates where request_id=${requestId} order by id asc`;
+    },
+    async insertAssistUpdate(row) {
+      const [saved] = await sql`insert into dxh.assist_updates(request_id, author_id, kind, body, status_after, created_at)
+          values(${row.request_id},${row.author_id},${row.kind},${row.body},${row.status_after || null},${row.created_at})
+          returning *`;
+      return saved;
+    },
+    async listCases() {
+      return await sql`select * from dxh.success_cases order by id desc`;
+    },
+    async caseById(id) {
+      const rows = await sql`select * from dxh.success_cases where id=${id}`;
+      return rows[0] || null;
+    },
+    async insertCase(row) {
+      const [saved] = await sql`insert into dxh.success_cases(title, domain_tags, background, highlight, outcome, display_names, facilitated_on, assist_id, demand_id, status, featured, created_by, created_at, updated_at, published_at)
+          values(${row.title},${row.domain_tags || ""},${row.background || ""},${row.highlight || ""},${row.outcome || ""},${row.display_names || ""},${row.facilitated_on || ""},${row.assist_id || null},${row.demand_id || null},${row.status},${!!row.featured},${row.created_by},${row.created_at},${row.updated_at},${row.published_at || null})
+          returning *`;
+      return saved;
+    },
+    async updateCase(id, fields) {
+      const [saved] = await sql`update dxh.success_cases set title=${fields.title}, domain_tags=${fields.domain_tags || ""},
+          background=${fields.background || ""}, highlight=${fields.highlight || ""}, outcome=${fields.outcome || ""},
+          display_names=${fields.display_names || ""}, facilitated_on=${fields.facilitated_on || ""},
+          assist_id=${fields.assist_id || null}, demand_id=${fields.demand_id || null}, status=${fields.status},
+          featured=${!!fields.featured}, updated_at=${fields.updated_at}, published_at=${fields.published_at || null}
+          where id=${id} returning *`;
+      return saved || null;
+    },
+    async deleteCase(id) {
+      const rows = await sql`delete from dxh.success_cases where id=${id} returning id`;
+      return rows.length > 0;
     },
   };
 }

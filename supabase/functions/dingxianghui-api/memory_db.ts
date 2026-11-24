@@ -17,8 +17,16 @@ export class MemoryDb implements Db {
   aiQuota: Row[] = [];
   aiRuns: Row[] = [];
   aiRankings: Row[] = [];
+  conversations: Row[] = [];
+  directMessages: Row[] = [];
+  announcements: Row[] = [];
+  announcementReads: Row[] = [];
+  notices: Row[] = [];
+  assists: Row[] = [];
+  assistUpdates: Row[] = [];
+  cases: Row[] = [];
   queriesToday = 0;
-  private seq = { user: 1, demand: 1, match: 1, session: 1, sms: 1, run: 1 };
+  private seq = { user: 1, demand: 1, match: 1, session: 1, sms: 1, run: 1, conversation: 1, message: 1, announcement: 1, notice: 1, assist: 1, assistUpdate: 1, case: 1 };
 
   constructor(seed?: { users?: Row[]; demands?: Row[]; matches?: Row[]; snapshots?: Row[] }) {
     this.users = seed?.users ? clone(seed.users) : [];
@@ -187,6 +195,7 @@ export class MemoryDb implements Db {
     if (!u) return null;
     u.audit_status = status;
     u.audit_note = note;
+    if (status === "approved" && !u.approved_at) u.approved_at = new Date().toISOString();
     return clone(u);
   }
   async throttleBump(bucket: string, windowSeconds: number) {
@@ -287,5 +296,148 @@ export class MemoryDb implements Db {
   }
   async insertAiRanking(row: Row) {
     this.aiRankings.push({ ...row });
+  }
+  async updateDemand(id: number, userId: number, fields: Row) {
+    const row = this.demands.find((item) => item.id === id && item.user_id === userId);
+    if (!row) return null;
+    Object.assign(row, fields);
+    return clone(row);
+  }
+  async setDemandLifecycle(id: number, userId: number, lifecycle: string, at: string) {
+    const row = this.demands.find((item) => item.id === id && item.user_id === userId);
+    if (!row || row.lifecycle === "已归档") return null;
+    row.lifecycle = lifecycle;
+    row.updated_at = at;
+    return clone(row);
+  }
+  async countAudience(audience: string, campus: string) {
+    return this.users.filter((user) => {
+      if (user.role !== "alumni" || user.is_demo || user.audit_status !== "approved") return false;
+      if (audience === "all_registered" || audience === "approved") return true;
+      if (audience === "campus") return user.campus === campus;
+      return false;
+    }).length;
+  }
+  async upsertConversation(row: Row) {
+    let found = this.conversations.find((item) => item.user_a === row.user_a && item.user_b === row.user_b);
+    if (!found) {
+      found = { ...row, id: this.seq.conversation++ };
+      this.conversations.push(found);
+    } else {
+      if (row.demand_id) found.demand_id = row.demand_id;
+      if (row.context_summary) found.context_summary = row.context_summary;
+      found.last_message_at = row.last_message_at;
+    }
+    return clone(found);
+  }
+  async conversationsFor(userId: number) {
+    return clone(this.conversations.filter((item) => item.user_a === userId || item.user_b === userId));
+  }
+  async conversationById(id: number) {
+    return clone(this.conversations.find((item) => item.id === id) || null);
+  }
+  async messagesFor(conversationIds: number[]) {
+    const ids = new Set(conversationIds);
+    return clone(this.directMessages.filter((item) => ids.has(item.conversation_id)).sort((a, b) => a.id - b.id));
+  }
+  async insertDirectMessage(row: Row) {
+    const saved = { ...row, id: this.seq.message++ };
+    this.directMessages.push(saved);
+    return clone(saved);
+  }
+  async markConversationRead(conversationId: number, readerId: number, at: string) {
+    for (const item of this.directMessages) {
+      if (item.conversation_id === conversationId && item.sender_id !== readerId && !item.read_at) item.read_at = at;
+    }
+  }
+  async listAnnouncements() {
+    return clone(this.announcements).sort((a, b) => b.id - a.id);
+  }
+  async insertAnnouncement(row: Row) {
+    const saved = { ...row, id: this.seq.announcement++ };
+    this.announcements.push(saved);
+    return clone(saved);
+  }
+  async revokeAnnouncement(id: number, at: string) {
+    const row = this.announcements.find((item) => item.id === id);
+    if (!row) return null;
+    row.revoked_at = at;
+    return clone(row);
+  }
+  async announcementReadsFor(userId: number) {
+    return clone(this.announcementReads.filter((item) => item.user_id === userId));
+  }
+  async readCounts() {
+    const counts = new Map<number, number>();
+    for (const item of this.announcementReads) counts.set(item.announcement_id, (counts.get(item.announcement_id) || 0) + 1);
+    return [...counts.entries()].map(([announcement_id, read_count]) => ({ announcement_id, read_count }));
+  }
+  async markAnnouncementRead(announcementId: number, userId: number, at: string) {
+    if (this.announcementReads.some((item) => item.announcement_id === announcementId && item.user_id === userId)) return;
+    this.announcementReads.push({ announcement_id: announcementId, user_id: userId, read_at: at });
+  }
+  async noticesFor(userId: number) {
+    return clone(this.notices.filter((item) => item.user_id === userId).sort((a, b) => b.id - a.id));
+  }
+  async insertNotice(row: Row) {
+    const saved = { ...row, id: this.seq.notice++ };
+    this.notices.push(saved);
+    return clone(saved);
+  }
+  async markNoticeRead(id: number, userId: number, at: string) {
+    const row = this.notices.find((item) => item.id === id && item.user_id === userId);
+    if (!row) return false;
+    row.read_at = row.read_at || at;
+    return true;
+  }
+  async markAllNoticesRead(userId: number, at: string) {
+    for (const item of this.notices) if (item.user_id === userId && !item.read_at) item.read_at = at;
+  }
+  async listAssists() {
+    return clone(this.assists).sort((a, b) => b.id - a.id);
+  }
+  async assistById(id: number) {
+    return clone(this.assists.find((item) => item.id === id) || null);
+  }
+  async insertAssist(row: Row) {
+    const saved = { ...row, id: this.seq.assist++ };
+    this.assists.push(saved);
+    return clone(saved);
+  }
+  async updateAssist(id: number, fields: Row) {
+    const row = this.assists.find((item) => item.id === id);
+    if (!row) return null;
+    Object.assign(row, fields);
+    return clone(row);
+  }
+  async listAssistUpdates(requestId: number) {
+    return clone(this.assistUpdates.filter((item) => item.request_id === requestId).sort((a, b) => a.id - b.id));
+  }
+  async insertAssistUpdate(row: Row) {
+    const saved = { ...row, id: this.seq.assistUpdate++ };
+    this.assistUpdates.push(saved);
+    return clone(saved);
+  }
+  async listCases() {
+    return clone(this.cases).sort((a, b) => b.id - a.id);
+  }
+  async caseById(id: number) {
+    return clone(this.cases.find((item) => item.id === id) || null);
+  }
+  async insertCase(row: Row) {
+    const saved = { ...row, id: this.seq.case++ };
+    this.cases.push(saved);
+    return clone(saved);
+  }
+  async updateCase(id: number, fields: Row) {
+    const row = this.cases.find((item) => item.id === id);
+    if (!row) return null;
+    Object.assign(row, fields);
+    return clone(row);
+  }
+  async deleteCase(id: number) {
+    const before = this.cases.length;
+    this.cases = this.cases.filter((item) => item.id !== id);
+    return this.cases.length < before;
   }
 }
