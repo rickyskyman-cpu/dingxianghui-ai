@@ -134,6 +134,16 @@ function badgeClass(status) {
 function badgeLabel(status) {
   return { approved: "已通过", rejected: "已驳回", amended: "已补充", pending: "待审核" }[status] || "待审核";
 }
+function cellsRow(pairs) {
+  return `<tr>${pairs.map(([label, html]) => `<td data-label="${esc(label)}">${html}</td>`).join("")}</tr>`;
+}
+function toggleCardActions(button) {
+  const bar = button && button.closest ? button.closest(".dx-card-actions") : null;
+  if (!bar) return;
+  const open = bar.classList.toggle("is-open");
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  button.textContent = open ? "收起操作" : "更多操作";
+}
 
 // ==================== Navigation & View Switching ====================
 function switchView(viewName) {
@@ -197,7 +207,7 @@ function updateHeaderUserStatus() {
       : currentUser.audit_status !== "approved"
         ? "等待审核"
         : currentUser.profile_completed ? "已通过审核" : "已通过审核，资料未完成";
-  pill.textContent = `${currentUser.real_name || ""} ${state}`;
+  pill.innerHTML = `<span class="session__name">${esc(currentUser.real_name || "")}</span><span class="session__state">${esc(state)}</span>`;
 }
 
 async function logoutCurrentUser(silent) {
@@ -926,6 +936,9 @@ function showAdminReview(kind, id) {
   } else if (kind === "match") {
     actions.innerHTML = `<button class="dx-button" type="button" onclick="adminToggle('/api/admin/match-success',{match_id:${item.id},success:${!item.is_success}})">${item.is_success ? "取消已撮合" : "标记已撮合"}</button>`;
   } else actions.innerHTML = "";
+  if (window.matchMedia && window.matchMedia("(max-width: 650px)").matches) {
+    document.getElementById("admin-review-panel")?.scrollIntoView({ block: "start" });
+  }
 }
 async function loadAdminDashboard() {
   if (!isRealAdmin(currentUser)) {
@@ -952,24 +965,27 @@ async function loadAdminDashboard() {
       ["待审核", pending], ["已通过", approved], ["已驳回", rejected], ["对接工单", matches.length],
     ].map(([label, n]) => `<div class="dx-stat-card"><div class="dx-stat-card__value">${n}</div><div class="dx-stat-card__label">${label}</div></div>`).join("");
   }
-  document.getElementById("admin-users-list").innerHTML = users.map((u) => `
-    <tr>
-      <td>用户</td>
-      <td>${esc(u.real_name)}</td>
-      <td>${esc(u.real_name)}</td>
-      <td>${esc(u.campus)}</td>
-      <td>${esc((u.created_at || "").slice(0, 10))}</td>
-      <td><span class="${badgeClass(statusOfUser(u))}">${badgeLabel(statusOfUser(u))}</span></td>
-      <td><button class="dx-button dx-button--text" type="button" onclick="showAdminReview('user', ${u.id})">查看</button></td>
-    </tr>`).join("") || `<tr><td colspan="7">暂无记录</td></tr>`;
+  document.getElementById("admin-users-list").innerHTML = users.map((u) => cellsRow([
+    ["类型", "用户"],
+    ["名称 / 标题", esc(u.real_name)],
+    ["提交人", esc(u.real_name)],
+    ["校区", esc(u.campus)],
+    ["提交时间", esc((u.created_at || "").slice(0, 10))],
+    ["状态", `<span class="${badgeClass(statusOfUser(u))}">${badgeLabel(statusOfUser(u))}</span>`],
+    ["操作", `<button class="dx-button dx-button--text" type="button" onclick="showAdminReview('user', ${u.id})">查看</button>`],
+  ])).join("") || `<tr><td colspan="7">暂无记录</td></tr>`;
   adminQueue.push(...matches.map((m) => ({ ...m, _kind: "match", _status: m.is_success ? "approved" : "pending" })));
   document.getElementById("admin-matches-list").innerHTML = matches.length ? `<div class="dx-table-wrap"><table class="dx-table dx-table--compact">
     <thead><tr><th>类型</th><th>名称 / 标题</th><th>提交人</th><th>校区</th><th>提交时间</th><th>状态</th><th>操作</th></tr></thead>
-    <tbody>${matches.map((m) => `<tr>
-      <td>对接</td><td>商机 #${esc(m.demand_id)}</td><td>—</td><td>—</td><td></td>
-      <td><span class="${badgeClass(m.is_success ? "approved" : "pending")}">${m.is_success ? "已通过" : "待审核"}</span></td>
-      <td><button class="dx-button dx-button--text" type="button" onclick="showAdminReview('match', ${m.id})">查看</button></td>
-    </tr>`).join("")}</tbody></table></div>` : '<p class="dx-help">暂无对接工单</p>';
+    <tbody>${matches.map((m) => cellsRow([
+      ["类型", "对接"],
+      ["名称 / 标题", `商机 #${esc(m.demand_id)}`],
+      ["提交人", "—"],
+      ["校区", "—"],
+      ["提交时间", ""],
+      ["状态", `<span class="${badgeClass(m.is_success ? "approved" : "pending")}">${m.is_success ? "已通过" : "待审核"}</span>`],
+      ["操作", `<button class="dx-button dx-button--text" type="button" onclick="showAdminReview('match', ${m.id})">查看</button>`],
+    ])).join("")}</tbody></table></div>` : '<p class="dx-help">暂无对接工单</p>';
 }
 
 async function adminAuditUser(userId, action) {
@@ -1228,14 +1244,15 @@ function renderMyDemands(list) {
     <h3>${esc(d.title)}</h3>
     <p>${esc(d.description || "")}</p>
     <p class="dx-help">${esc(d.demand_code || "")} · 更新 ${esc(String(d.updated_at || d.created_at || "").slice(0, 16).replace("T", " "))}</p>
-    <div class="dx-action-bar">
+    <div class="dx-action-bar dx-card-actions">
       <button class="dx-button dx-button--secondary" type="button" onclick="openDemandEditor(${Number(d.id)})">编辑</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setDemandState(${Number(d.id)}, '进行中')">进行中</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setDemandState(${Number(d.id)}, '暂停')">暂停</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setDemandState(${Number(d.id)}, '已对接完成')">已对接完成</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setDemandState(${Number(d.id)}, '已关闭')">已关闭</button>
-      <button class="dx-button dx-button--text" type="button" onclick="refreshDemand(${Number(d.id)})">刷新动态</button>
-      <button class="dx-button dx-button--text" type="button" onclick="archiveDemand(${Number(d.id)})">归档</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setDemandState(${Number(d.id)}, '进行中')">进行中</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setDemandState(${Number(d.id)}, '暂停')">暂停</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setDemandState(${Number(d.id)}, '已对接完成')">已对接完成</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setDemandState(${Number(d.id)}, '已关闭')">已关闭</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="refreshDemand(${Number(d.id)})">刷新动态</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="archiveDemand(${Number(d.id)})">归档</button>
+      <button class="dx-more-toggle" type="button" aria-expanded="false" onclick="toggleCardActions(this)">更多操作</button>
     </div>
   </article>`).join("");
 }
@@ -1407,11 +1424,13 @@ async function openThread(id) {
   if (box) box.innerHTML = `<button class="dx-button dx-button--text dx-thread-back" type="button" onclick="showInboxList()">返回列表</button>
     <h2>${esc(conv.peer && conv.peer.masked_name || "会话")}</h2>
     <p class="dx-help">${esc(conv.context_summary || "")}${conv.demand ? " · " + esc(conv.demand.title) : ""}</p>
-    <div class="dx-thread-log">${(data.messages || []).map((item) => `<div class="dx-bubble"><strong>${item.mine ? "我" : "对方"}</strong><p>${esc(item.body)}</p>${item.context_summary ? `<p class="dx-help">${esc(item.context_summary)}</p>` : ""}</div>`).join("")}</div>
+    <div class="dx-thread-log">${(data.messages || []).map((item) => `<div class="dx-bubble ${item.mine ? "is-mine" : "is-theirs"}"><strong>${item.mine ? "我" : "对方"}</strong><p>${esc(item.body)}</p>${item.context_summary ? `<p class="dx-help">${esc(item.context_summary)}</p>` : ""}</div>`).join("")}</div>
     <form class="dx-reply" onsubmit="replyThread(event, ${peerId}, ${demandId})">
       <div class="dx-field"><label for="thread-reply">回复</label><textarea id="thread-reply" class="dx-textarea" maxlength="800" required></textarea></div>
-      <button class="dx-button" type="submit">发送回复</button>
-      <button class="dx-button dx-button--text" type="button" onclick="openAssist(${peerId}, ${demandId})">就此申请官方协助</button>
+      <div class="dx-reply-actions">
+        <button class="dx-button" type="submit">发送回复</button>
+        <button class="dx-button dx-button--text" type="button" onclick="openAssist(${peerId}, ${demandId})">就此申请官方协助</button>
+      </div>
     </form>`;
   loadInbox(true);
   refreshUnread();
@@ -1610,12 +1629,13 @@ async function loadAdminCases() {
   box.innerHTML = (data.cases || []).map((item) => `<article class="dx-match-card">
     <h3>${esc(item.title)}</h3>
     <p class="dx-help">${esc(label[item.status] || item.status)}${item.featured ? " · 精选" : ""} · ${esc(item.domain_tags || "")}</p>
-    <div class="dx-action-bar">
+    <div class="dx-action-bar dx-card-actions">
       <button class="dx-button dx-button--text" type="button" onclick="editAdminCase(${Number(item.id)})">编辑</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setCaseStatus(${Number(item.id)}, 'published', ${item.featured ? "true" : "false"})">发布</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setCaseStatus(${Number(item.id)}, 'archived', ${item.featured ? "true" : "false"})">下架</button>
-      <button class="dx-button dx-button--text" type="button" onclick="setCaseStatus(${Number(item.id)}, '${item.status}', ${item.featured ? "false" : "true"})">${item.featured ? "取消精选" : "设为精选"}</button>
-      <button class="dx-button dx-button--text" type="button" onclick="deleteAdminCase(${Number(item.id)})">删除</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setCaseStatus(${Number(item.id)}, 'published', ${item.featured ? "true" : "false"})">发布</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setCaseStatus(${Number(item.id)}, 'archived', ${item.featured ? "true" : "false"})">下架</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="setCaseStatus(${Number(item.id)}, '${item.status}', ${item.featured ? "false" : "true"})">${item.featured ? "取消精选" : "设为精选"}</button>
+      <button class="dx-button dx-button--text dx-card-actions__extra" type="button" onclick="deleteAdminCase(${Number(item.id)})">删除</button>
+      <button class="dx-more-toggle" type="button" aria-expanded="false" onclick="toggleCardActions(this)">更多操作</button>
     </div>
   </article>`).join("") || '<p class="dx-help">没有案例</p>';
 }
@@ -1623,7 +1643,12 @@ async function editAdminCase(id) {
   const res = await apiFetch(`/api/admin/cases?keyword=`);
   const data = await res.json();
   const item = (data.cases || []).find((row) => row.id === id);
-  if (item) fillCaseForm(item);
+  if (item) {
+    fillCaseForm(item);
+    if (window.matchMedia && window.matchMedia("(max-width: 650px)").matches) {
+      document.getElementById("admin-case-form")?.scrollIntoView({ block: "start" });
+    }
+  }
 }
 async function setCaseStatus(id, status, featured) {
   const res = await apiFetch(`/api/admin/cases/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, featured }) });
