@@ -1,7 +1,31 @@
 import type { Db, Row } from "./db.ts";
 
 // Every statement is limited to schema dxh. This file does not read or write other schemas.
-export function createSqlDb(sql: any): Db {
+
+function isIdKey(key: string) {
+  return key === "id" || key === "user_a" || key === "user_b" || key.endsWith("_id");
+}
+
+export function normalizeSqlRows(result: any) {
+  if (!Array.isArray(result)) return result;
+  for (const row of result) {
+    if (!row || typeof row !== "object") continue;
+    for (const key of Object.keys(row)) {
+      const value = row[key];
+      if (!isIdKey(key) || value == null || value === "") continue;
+      if (typeof value === "number" && Number.isSafeInteger(value)) continue;
+      if (typeof value === "string" && /^-?\d+$/.test(value)) {
+        const parsed = Number(value);
+        if (Number.isSafeInteger(parsed)) row[key] = parsed;
+      }
+    }
+  }
+  return result;
+}
+
+export function createSqlDb(rawSql: any): Db {
+  const sql = (strings: TemplateStringsArray, ...values: unknown[]) =>
+    Promise.resolve(rawSql(strings, ...values)).then(normalizeSqlRows);
   return {
     async purgeExpiredSessions() {
       await sql`delete from dxh.sessions where expires_at < now()`;
@@ -280,10 +304,10 @@ export function createSqlDb(sql: any): Db {
     },
     async countAudience(audience, campus) {
       const [{ n }] = await sql`select count(*)::int n from dxh.users
-          where role='alumni' and is_demo is not true
+          where role='alumni' and is_demo is not true and audit_status='approved'
           and (
             ${audience} = 'all_registered'
-            or (${audience} = 'approved' and audit_status='approved')
+            or ${audience} = 'approved'
             or (${audience} = 'campus' and campus=${campus})
           )`;
       return n;

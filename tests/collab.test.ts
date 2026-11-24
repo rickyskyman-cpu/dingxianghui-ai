@@ -47,6 +47,15 @@ test("migration stays inside dxh and locks new tables", () => {
     assert.match(sql, new RegExp(`alter table dxh\\.${table} enable row level security`, "i"));
     assert.match(sql, new RegExp(`revoke all on table dxh\\.${table} from public, anon, authenticated`, "i"));
   }
+  assert.match(sql, /user_a integer not null/);
+  assert.match(sql, /sender_id integer not null/);
+  assert.match(sql, /requester_id integer not null/);
+  assert.match(sql, /references dxh\.users\(id\) on delete cascade/i);
+  assert.match(sql, /references dxh\.demands\(id\) on delete set null/i);
+  assert.match(sql, /references dxh\.conversations\(id\) on delete cascade/i);
+  assert.doesNotMatch(sql, /user_a bigint/);
+  assert.doesNotMatch(sql, /sender_id bigint/);
+  assert.doesNotMatch(sql, /requester_id bigint/);
   assert.doesNotMatch(statements, /\bpublic\./);
   assert.doesNotMatch(statements, /\bstorage\b/i);
   assert.doesNotMatch(statements, /demand-media/);
@@ -141,7 +150,7 @@ test("directory hides phone numbers and messaging enforces participants", async 
   const threads = await call(db, "/api/messages", { token: b });
   const threadId = (await threads.json()).conversations[0].id;
   const outsider = await call(db, `/api/messages/${threadId}`, { token: c });
-  assert.equal(outsider.status, 403);
+  assert.equal(outsider.status, 404);
   const opened = await call(db, `/api/messages/${threadId}`, { token: b });
   const openedBody = await opened.json();
   assert.equal(opened.status, 200);
@@ -225,12 +234,20 @@ test("human assist, notices, cases, and broadcasts follow the rules", async () =
   const lateToken = pending;
   const lateNotices = await (await call(db, "/api/notices", { token: lateToken })).json();
   assert.equal(lateNotices.items.some((item: { title: string }) => item.title === "仅已通过"), false);
+  db.users.push({ id: 9, phone: "13900000009", real_name: "已驳回", role: "alumni", is_demo: false, audit_status: "rejected", profile_completed: 0, campus: "深圳" });
   const broadcast = await call(db, "/api/admin/announcements", {
     method: "POST", token: admin,
     body: { title: "全体公告", body: "后续通过审核的会员也能看到", category: "活动通知", audience: "all_registered" },
   });
   const broadcastBody = await broadcast.json();
   assert.equal(broadcastBody.announcement.covered_count, 4);
+  const campusNote = await call(db, "/api/admin/announcements", {
+    method: "POST", token: admin,
+    body: { title: "深圳校区", body: "只统计该校区已通过会员", category: "活动通知", audience: "campus", campus: "深圳" },
+  });
+  const campusBody = await campusNote.json();
+  assert.equal(campusNote.status, 200, JSON.stringify(campusBody));
+  assert.equal(campusBody.announcement.covered_count, 2);
   const seen = await (await call(db, "/api/notices", { token: lateToken })).json();
   assert.equal(seen.items.some((item: { title: string }) => item.title === "全体公告"), true);
   const read = await call(db, `/api/notices/announcement/${broadcastBody.announcement.id}/read`, { method: "POST", token: lateToken, body: {} });

@@ -312,9 +312,8 @@ export class MemoryDb implements Db {
   }
   async countAudience(audience: string, campus: string) {
     return this.users.filter((user) => {
-      if (user.role !== "alumni" || user.is_demo) return false;
-      if (audience === "all_registered") return true;
-      if (audience === "approved") return user.audit_status === "approved";
+      if (user.role !== "alumni" || user.is_demo || user.audit_status !== "approved") return false;
+      if (audience === "all_registered" || audience === "approved") return true;
       if (audience === "campus") return user.campus === campus;
       return false;
     }).length;

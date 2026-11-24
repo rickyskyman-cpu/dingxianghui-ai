@@ -1366,38 +1366,54 @@ function showInboxTab(name) {
   if (officialTab) officialTab.setAttribute("aria-selected", name === "official" ? "true" : "false");
   if (name === "official") loadNotices();
 }
-async function loadInbox() {
-  showInboxTab("mail");
+function showInboxList() {
+  const pane = document.getElementById("inbox-pane");
+  if (pane) pane.classList.remove("is-reading");
+}
+async function loadInbox(keepThread) {
+  if (!keepThread) showInboxTab("mail");
   const box = document.getElementById("inbox-list");
   if (!box) return;
   const res = await apiFetch("/api/messages");
   const data = await res.json();
   if (!res.ok) { box.innerHTML = `<div class="dx-state">${esc(data.detail || "请先登录")}</div>`; return; }
   const rows = data.conversations || [];
-  box.innerHTML = rows.length ? rows.map((item) => `<button class="dx-list-button ${item.id === activeConversationId ? "is-current" : ""}" type="button" onclick="openThread(${Number(item.id)})">
-    <strong>${esc(item.peer && item.peer.masked_name || "校友")}</strong>
-    ${item.unread ? `<span class="nav-count">${esc(item.unread)}</span>` : ""}
-    <span class="dx-help">${esc(item.last_preview || item.context_summary || "")}</span>
-  </button>`).join("") : '<div class="dx-state"><h2>还没有留言</h2></div>';
+  box.innerHTML = rows.length ? rows.map((item) => {
+    const current = Number(item.id) === Number(activeConversationId);
+    const when = String(item.last_message_at || "").replace("T", " ").slice(5, 16);
+    const preview = item.last_preview || item.context_summary || "";
+    return `<button class="dx-thread-item ${current ? "is-current" : ""}" type="button" onclick="openThread(${Number(item.id)})">
+      <span class="dx-thread-item__top"><strong>${esc(item.peer && item.peer.masked_name || "校友")}</strong><span class="dx-thread-item__meta">${item.unread ? `<span class="nav-count">${esc(item.unread)}</span>` : ""}${when ? `<time>${esc(when)}</time>` : ""}</span></span>
+      <span class="dx-thread-item__preview">${esc(preview)}</span>
+    </button>`;
+  }).join("") : '<div class="dx-state"><h2>还没有留言</h2></div>';
   refreshUnread();
 }
 async function openThread(id) {
-  activeConversationId = id;
-  const res = await apiFetch(`/api/messages/${id}`);
+  activeConversationId = Number(id);
+  const pane = document.getElementById("inbox-pane");
+  if (pane) pane.classList.add("is-reading");
+  const res = await apiFetch(`/api/messages/${activeConversationId}`);
   const data = await res.json();
   const box = document.getElementById("inbox-thread");
-  if (!res.ok) { if (box) box.innerHTML = `<div class="dx-state">${esc(data.detail || "不能打开该会话")}</div>`; return; }
+  if (!res.ok) {
+    if (pane) pane.classList.remove("is-reading");
+    if (box) box.innerHTML = `<div class="dx-state">${esc(data.detail || "不能打开该会话")}</div>`;
+    return;
+  }
   const conv = data.conversation || {};
-  const peerId = conv.peer && conv.peer.id;
-  if (box) box.innerHTML = `<h2>${esc(conv.peer && conv.peer.masked_name || "会话")}</h2>
+  const peerId = Number(conv.peer && conv.peer.id) || 0;
+  const demandId = Number(conv.demand && conv.demand.id) || 0;
+  if (box) box.innerHTML = `<button class="dx-button dx-button--text dx-thread-back" type="button" onclick="showInboxList()">返回列表</button>
+    <h2>${esc(conv.peer && conv.peer.masked_name || "会话")}</h2>
     <p class="dx-help">${esc(conv.context_summary || "")}${conv.demand ? " · " + esc(conv.demand.title) : ""}</p>
-    ${(data.messages || []).map((item) => `<div class="dx-bubble"><strong>${item.mine ? "我" : "对方"}</strong><p>${esc(item.body)}</p>${item.context_summary ? `<p class="dx-help">${esc(item.context_summary)}</p>` : ""}</div>`).join("")}
-    <form onsubmit="replyThread(event, ${Number(peerId) || 0}, ${Number(conv.demand && conv.demand.id) || 0})">
+    <div class="dx-thread-log">${(data.messages || []).map((item) => `<div class="dx-bubble"><strong>${item.mine ? "我" : "对方"}</strong><p>${esc(item.body)}</p>${item.context_summary ? `<p class="dx-help">${esc(item.context_summary)}</p>` : ""}</div>`).join("")}</div>
+    <form class="dx-reply" onsubmit="replyThread(event, ${peerId}, ${demandId})">
       <div class="dx-field"><label for="thread-reply">回复</label><textarea id="thread-reply" class="dx-textarea" maxlength="800" required></textarea></div>
       <button class="dx-button" type="submit">发送回复</button>
-      <button class="dx-button dx-button--text" type="button" onclick="openAssist(${Number(peerId) || 0}, ${Number(conv.demand && conv.demand.id) || 0})">就此申请官方协助</button>
+      <button class="dx-button dx-button--text" type="button" onclick="openAssist(${peerId}, ${demandId})">就此申请官方协助</button>
     </form>`;
-  loadInbox();
+  loadInbox(true);
   refreshUnread();
 }
 async function replyThread(e, peerId, demandId) {

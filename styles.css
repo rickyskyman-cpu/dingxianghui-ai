@@ -99,11 +99,24 @@ body:has(#view-home.active) .dx-footer { margin-top: 0; }
 .dx-split { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--dx-space-16); align-items: start; }
 .dx-thread { background: var(--dx-color-white); border: 1px solid var(--dx-color-line); padding: var(--dx-space-16); min-height: 280px; }
 .dx-bubble { border-top: 1px solid var(--dx-color-line); padding: var(--dx-space-12) 0; }
-.dx-list-button { display: block; width: 100%; text-align: left; background: var(--dx-color-white); border: 1px solid var(--dx-color-line); padding: var(--dx-space-12); margin-bottom: var(--dx-space-8); min-height: 44px; }
-.dx-list-button.is-current { box-shadow: inset 3px 0 0 var(--dx-color-orange); }
+.dx-list-button, .dx-thread-item { display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%; text-align: left; background: var(--dx-color-white); border: 1px solid var(--dx-color-line); padding: var(--dx-space-12); margin-bottom: var(--dx-space-8); min-height: 44px; }
+.dx-list-button.is-current, .dx-thread-item.is-current { box-shadow: inset 3px 0 0 var(--dx-color-orange); }
+.dx-thread-item__top { display: flex; justify-content: space-between; align-items: center; gap: var(--dx-space-12); }
+.dx-thread-item__meta { display: inline-flex; align-items: center; gap: var(--dx-space-8); flex: none; color: var(--dx-color-muted); font-size: var(--dx-size-caption); }
+.dx-thread-item__preview { display: block; color: var(--dx-color-muted); font-size: var(--dx-size-small); line-height: 1.5; }
+.dx-thread-back { display: none; }
+.dx-thread-item__meta .nav-count { margin-left: 0; }
 @media (max-width: 950px) {
   .dx-split { grid-template-columns: 1fr; }
 }
 @media (max-width: 650px) {
-  .dx-nav { width: 100%; }
+  .dx-header { align-items: flex-start; }
+  .dx-header .dx-nav { flex: 1 0 100%; width: 100%; gap: 0; }
+  .dx-header .session { margin-left: 0; }
+  .dx-nav .nav-btn, #logout-btn { white-space: nowrap; padding-left: 8px; padding-right: 8px; }
+  .dx-inbox-pane.is-reading #inbox-list { display: none; }
+  .dx-inbox-pane:not(.is-reading) #inbox-thread { display: none; }
+  .dx-thread-back { display: inline-flex; }
+  .dx-thread { min-height: 0; }
+  .dx-reply { position: sticky; bottom: 0; background: var(--dx-color-white); padding-top: var(--dx-space-8); }
 }

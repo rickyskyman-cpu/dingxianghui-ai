@@ -9,6 +9,16 @@ const cleanList = (v: Any, maxItems = 8) =>
 const J = (s: Any) => { try { return Array.isArray(s) ? s : JSON.parse(s || "[]"); } catch { return []; } };
 const dept0 = (d: string) => (d || "").split("·")[0].trim();
 const iso = () => new Date().toISOString();
+export function idNum(value: Any) {
+  if (value == null || value === "") return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
+}
+function sameId(a: Any, b: Any) {
+  const left = idNum(a);
+  const right = idNum(b);
+  return left !== 0 && left === right;
+}
 const stamp = (v: Any) => {
   const t = new Date(v || 0).getTime();
   return Number.isFinite(t) ? t : 0;
@@ -45,7 +55,7 @@ function chars(v: string) {
 function alumniCard(u: Any) {
   if (!u) return null;
   return {
-    id: u.id,
+    id: idNum(u.id),
     masked_name: `${maskPerson(u.real_name)} · ${u.enroll_year || ""} ${dept0(u.department)}`.trim(),
     campus: u.campus || "",
     enroll_year: u.enroll_year || "",
@@ -75,8 +85,25 @@ function adminContact(u: Any) {
     openness: u.openness || "开放对接",
   };
 }
-function pair(a: number, b: number) {
-  return a < b ? [a, b] : [b, a];
+function pair(a: Any, b: Any) {
+  const left = idNum(a);
+  const right = idNum(b);
+  return left < right ? [left, right] : [right, left];
+}
+function demandIsPublic(row: Any) {
+  const life = row?.lifecycle || "进行中";
+  return life === "进行中" || life === "已对接完成";
+}
+async function usableDemand(db: Db, user: Any, demandId: Any, targetUserId: Any) {
+  if (!demandId) return null;
+  const demand = await db.demandById(idNum(demandId));
+  if (!demand || (demand.lifecycle || "") === "已归档") throw new HttpErr(400, "关联的供需不存在或已不可用");
+  const owner = idNum(demand.user_id);
+  const mine = sameId(owner, user.id);
+  const targetOwns = targetUserId && sameId(owner, targetUserId);
+  if (!mine && !targetOwns) throw new HttpErr(400, "关联的供需不存在或已不可用");
+  if (!mine && !demandIsPublic(demand)) throw new HttpErr(400, "关联的供需不存在或已不可用");
+  return demand;
 }
 function approvedBefore(user: Any, at: Any) {
   if (!user || user.audit_status !== "approved" || isDemoActor(user)) return false;
@@ -94,7 +121,7 @@ function announcementVisible(row: Any, user: Any) {
 }
 function demandBrief(d: Any) {
   if (!d) return null;
-  return { id: d.id, demand_code: d.demand_code || "", title: d.title || "", industry: d.industry || "", city: d.city || "", lifecycle: d.lifecycle || "进行中" };
+  return { id: idNum(d.id), demand_code: d.demand_code || "", title: d.title || "", industry: d.industry || "", city: d.city || "", lifecycle: d.lifecycle || "进行中" };
 }
 function caseOut(row: Any) {
   return {
@@ -117,7 +144,7 @@ function caseOut(row: Any) {
 }
 function assistUserView(row: Any, target: Any, demand: Any, updates: Any[]) {
   return {
-    id: row.id,
+    id: idNum(row.id),
     status: row.status,
     urgency: row.urgency,
     appeal: row.appeal,
@@ -135,8 +162,8 @@ function assistUserView(row: Any, target: Any, demand: Any, updates: Any[]) {
 }
 
 async function ownedDemand(db: Db, user: Any, id: number) {
-  const row = await db.demandById(id);
-  if (!row || row.user_id !== user.id) throw new HttpErr(404, "未找到该供需");
+  const row = await db.demandById(idNum(id));
+  if (!row || !sameId(row.user_id, user.id)) throw new HttpErr(404, "未找到该供需");
   if (isDemoActor(user) && !row.is_demo) throw new HttpErr(404, "未找到该供需");
   return row;
 }
@@ -200,10 +227,10 @@ async function guardMessageRate(db: Db, userId: number) {
 async function sendMessage(db: Db, user: Any, body: Any) {
   requireApproved(user);
   if (user.role !== "alumni") throw new HttpErr(403, "仅已审核通过的校友可以互发站内信");
-  const toId = Number(body.to_user_id);
+  const toId = idNum(body.to_user_id);
   const rawBody = String(body.body ?? "");
   if (!toId) throw new HttpErr(400, "请选择留言对象");
-  if (toId === user.id) throw new HttpErr(400, "不能给自己发站内信");
+  if (sameId(toId, user.id)) throw new HttpErr(400, "不能给自己发站内信");
   if (chars(rawBody) > MESSAGE_MAX) throw new HttpErr(400, "留言不能超过 800 字");
   const text = clean(rawBody, MESSAGE_MAX);
   if (!text) throw new HttpErr(400, "请填写留言内容");
@@ -211,13 +238,9 @@ async function sendMessage(db: Db, user: Any, body: Any) {
   if (!target || target.role !== "alumni" || target.audit_status !== "approved" || isDemoActor(target)) {
     throw new HttpErr(403, "只能给已审核通过的校友发站内信");
   }
-  let demandId: number | null = null;
-  if (body.demand_id) {
-    const demand = await db.demandById(Number(body.demand_id));
-    if (!demand) throw new HttpErr(400, "关联的供需不存在");
-    demandId = demand.id;
-  }
-  await guardMessageRate(db, user.id);
+  const demand = await usableDemand(db, user, body.demand_id, toId);
+  const demandId = demand ? idNum(demand.id) : null;
+  await guardMessageRate(db, idNum(user.id));
   const [userA, userB] = pair(user.id, toId);
   const context = clean(body.context || body.context_summary, 200);
   const at = iso();
@@ -225,41 +248,42 @@ async function sendMessage(db: Db, user: Any, body: Any) {
     user_a: userA, user_b: userB, demand_id: demandId, context_summary: context, last_message_at: at, created_at: at,
   });
   const message = await db.insertDirectMessage({
-    conversation_id: conversation.id, sender_id: user.id, body: text, demand_id: demandId, context_summary: context, created_at: at, read_at: null,
+    conversation_id: idNum(conversation.id), sender_id: idNum(user.id), body: text, demand_id: demandId, context_summary: context, created_at: at, read_at: null,
   });
-  return { conversation_id: conversation.id, message: { id: message.id, body: message.body, created_at: message.created_at } };
+  return { conversation_id: idNum(conversation.id), message: { id: idNum(message.id), body: message.body, created_at: message.created_at } };
 }
 
 async function conversationFor(db: Db, user: Any, id: number) {
   requireApproved(user);
-  const row = await db.conversationById(id);
-  if (!row || (row.user_a !== user.id && row.user_b !== user.id)) throw new HttpErr(403, "不能查看他人的会话");
+  const row = await db.conversationById(idNum(id));
+  if (!row || (!sameId(row.user_a, user.id) && !sameId(row.user_b, user.id))) throw new HttpErr(404, "未找到该会话");
   return row;
 }
 
 async function listConversations(db: Db, user: Any) {
   requireApproved(user);
-  const rows = await db.conversationsFor(user.id);
-  const messages = await db.messagesFor(rows.map((row) => row.id));
+  const rows = await db.conversationsFor(idNum(user.id));
+  const messages = await db.messagesFor(rows.map((row) => idNum(row.id)));
   const byConv = new Map<number, Any[]>();
   for (const message of messages) {
-    const list = byConv.get(message.conversation_id) || [];
+    const key = idNum(message.conversation_id);
+    const list = byConv.get(key) || [];
     list.push(message);
-    byConv.set(message.conversation_id, list);
+    byConv.set(key, list);
   }
   const items = [];
   for (const row of rows) {
-    const peerId = row.user_a === user.id ? row.user_b : row.user_a;
+    const peerId = sameId(row.user_a, user.id) ? idNum(row.user_b) : idNum(row.user_a);
     const peer = await db.userById(peerId);
-    const thread = byConv.get(row.id) || [];
+    const thread = byConv.get(idNum(row.id)) || [];
     const latest = thread[thread.length - 1];
     items.push({
-      id: row.id,
+      id: idNum(row.id),
       peer: alumniCard(peer),
-      unread: thread.filter((item) => item.sender_id !== user.id && !item.read_at).length,
+      unread: thread.filter((item) => !sameId(item.sender_id, user.id) && !item.read_at).length,
       last_message_at: row.last_message_at || row.created_at,
       last_preview: latest ? [...String(latest.body)].slice(0, 80).join("") : "",
-      demand_id: row.demand_id || null,
+      demand_id: row.demand_id ? idNum(row.demand_id) : null,
       context_summary: row.context_summary || "",
     });
   }
@@ -269,24 +293,24 @@ async function listConversations(db: Db, user: Any) {
 
 async function openConversation(db: Db, user: Any, id: number) {
   const row = await conversationFor(db, user, id);
-  await db.markConversationRead(id, user.id, iso());
-  const messages = await db.messagesFor([id]);
-  const peerId = row.user_a === user.id ? row.user_b : row.user_a;
+  await db.markConversationRead(idNum(row.id), idNum(user.id), iso());
+  const messages = await db.messagesFor([idNum(row.id)]);
+  const peerId = sameId(row.user_a, user.id) ? idNum(row.user_b) : idNum(row.user_a);
   const peer = await db.userById(peerId);
-  const demand = row.demand_id ? await db.demandById(row.demand_id) : null;
+  const demand = row.demand_id ? await db.demandById(idNum(row.demand_id)) : null;
   return {
     conversation: {
-      id: row.id,
+      id: idNum(row.id),
       peer: alumniCard(peer),
       demand: demandBrief(demand),
       context_summary: row.context_summary || "",
     },
     messages: messages.map((item) => ({
-      id: item.id,
-      sender_id: item.sender_id,
-      mine: item.sender_id === user.id,
+      id: idNum(item.id),
+      sender_id: idNum(item.sender_id),
+      mine: sameId(item.sender_id, user.id),
       body: item.body,
-      demand_id: item.demand_id || null,
+      demand_id: item.demand_id ? idNum(item.demand_id) : null,
       context_summary: item.context_summary || "",
       created_at: item.created_at,
     })),
@@ -296,23 +320,23 @@ async function openConversation(db: Db, user: Any, id: number) {
 async function officialItems(db: Db, user: Any) {
   requireApproved(user);
   const announcements = (await db.listAnnouncements()).filter((row) => announcementVisible(row, user));
-  const reads = new Set((await db.announcementReadsFor(user.id)).map((row) => row.announcement_id));
+  const reads = new Set((await db.announcementReadsFor(idNum(user.id))).map((row) => idNum(row.announcement_id)));
   const notices = await db.noticesFor(user.id);
   const items = [
     ...announcements.map((row) => ({
       kind: "announcement",
-      id: row.id,
+      id: idNum(row.id),
       title: row.title,
       body: row.body,
       category: row.category,
       created_at: row.created_at,
-      read: reads.has(row.id),
+      read: reads.has(idNum(row.id)),
       ref_type: "announcement",
       ref_id: row.id,
     })),
     ...notices.map((row) => ({
       kind: "notice",
-      id: row.id,
+      id: idNum(row.id),
       title: row.title,
       body: row.body,
       category: row.category || "对接进展",
@@ -371,21 +395,17 @@ async function createAssist(db: Db, user: Any, body: Any) {
   if (!URGENCY.has(urgency)) throw new HttpErr(400, "紧急程度只能是普通、较急或紧急");
   let targetId: number | null = null;
   if (body.target_user_id) {
-    const target = await db.userById(Number(body.target_user_id));
-    if (!target || target.role !== "alumni" || target.audit_status !== "approved" || target.id === user.id) {
+    const target = await db.userById(idNum(body.target_user_id));
+    if (!target || target.role !== "alumni" || target.audit_status !== "approved" || sameId(target.id, user.id)) {
       throw new HttpErr(400, "对接对象需要是其他已审核通过的校友");
     }
-    targetId = target.id;
+    targetId = idNum(target.id);
   }
-  let demandId: number | null = null;
-  if (body.demand_id) {
-    const demand = await db.demandById(Number(body.demand_id));
-    if (!demand) throw new HttpErr(400, "关联的供需不存在");
-    demandId = demand.id;
-  }
+  const linked = await usableDemand(db, user, body.demand_id, targetId);
+  const demandId = linked ? idNum(linked.id) : null;
   const at = iso();
   const saved = await db.insertAssist({
-    requester_id: user.id,
+    requester_id: idNum(user.id),
     target_user_id: targetId,
     demand_id: demandId,
     appeal,
@@ -402,18 +422,18 @@ async function createAssist(db: Db, user: Any, body: Any) {
 }
 
 async function assistForUser(db: Db, user: Any, id: number) {
-  const row = await db.assistById(id);
+  const row = await db.assistById(idNum(id));
   if (!row) throw new HttpErr(404, "未找到该申请");
-  if (row.requester_id !== user.id && !isRealAdmin(user)) throw new HttpErr(403, "不能查看他人的对接申请");
-  const target = row.target_user_id ? await db.userById(row.target_user_id) : null;
-  const demand = row.demand_id ? await db.demandById(row.demand_id) : null;
-  const updates = await db.listAssistUpdates(id);
+  if (!sameId(row.requester_id, user.id) && !isRealAdmin(user)) throw new HttpErr(403, "不能查看他人的对接申请");
+  const target = row.target_user_id ? await db.userById(idNum(row.target_user_id)) : null;
+  const demand = row.demand_id ? await db.demandById(idNum(row.demand_id)) : null;
+  const updates = await db.listAssistUpdates(idNum(id));
   return assistUserView(row, target, demand, updates);
 }
 
 async function listMyAssists(db: Db, user: Any) {
   requireApproved(user);
-  const rows = (await db.listAssists()).filter((row) => row.requester_id === user.id);
+  const rows = (await db.listAssists()).filter((row) => sameId(row.requester_id, user.id));
   const items = [];
   for (const row of rows) items.push(await assistForUser(db, user, row.id));
   return { assists: items };
@@ -421,21 +441,21 @@ async function listMyAssists(db: Db, user: Any) {
 
 async function supplementAssist(db: Db, user: Any, id: number, body: Any) {
   requireApproved(user);
-  const row = await db.assistById(id);
-  if (!row || row.requester_id !== user.id) throw new HttpErr(403, "不能修改他人的对接申请");
+  const row = await db.assistById(idNum(id));
+  if (!row || !sameId(row.requester_id, user.id)) throw new HttpErr(403, "不能修改他人的对接申请");
   if (row.status === "已促成" || row.status === "已关闭") throw new HttpErr(400, "该申请已结案，不能再补充");
   const text = clean(body.note || body.body, 500);
   if (chars(text) < 2) throw new HttpErr(400, "请填写补充说明");
   const at = iso();
-  await db.insertAssistUpdate({ request_id: id, author_id: user.id, kind: "supplement", body: text, status_after: row.status, created_at: at });
-  await db.updateAssist(id, { updated_at: at });
+  await db.insertAssistUpdate({ request_id: idNum(id), author_id: idNum(user.id), kind: "supplement", body: text, status_after: row.status, created_at: at });
+  await db.updateAssist(idNum(id), { updated_at: at });
   return { message: "已补充说明", assist: await assistForUser(db, user, id) };
 }
 
 async function cancelAssist(db: Db, user: Any, id: number) {
   requireApproved(user);
-  const row = await db.assistById(id);
-  if (!row || row.requester_id !== user.id) throw new HttpErr(403, "不能取消他人的对接申请");
+  const row = await db.assistById(idNum(id));
+  if (!row || !sameId(row.requester_id, user.id)) throw new HttpErr(403, "不能取消他人的对接申请");
   if (row.status !== "待受理") throw new HttpErr(400, "只有待受理的申请可以取消");
   const at = iso();
   await db.updateAssist(id, { status: "已关闭", updated_at: at });
@@ -458,12 +478,12 @@ async function notifyRequester(db: Db, request: Any, adminId: number, text: stri
 }
 
 async function adminAssistDetail(db: Db, id: number) {
-  const row = await db.assistById(id);
+  const row = await db.assistById(idNum(id));
   if (!row) throw new HttpErr(404, "未找到该申请");
-  const requester = await db.userById(row.requester_id);
-  const target = row.target_user_id ? await db.userById(row.target_user_id) : null;
-  const demand = row.demand_id ? await db.demandById(row.demand_id) : null;
-  const updates = await db.listAssistUpdates(id);
+  const requester = await db.userById(idNum(row.requester_id));
+  const target = row.target_user_id ? await db.userById(idNum(row.target_user_id)) : null;
+  const demand = row.demand_id ? await db.demandById(idNum(row.demand_id)) : null;
+  const updates = await db.listAssistUpdates(idNum(id));
   return {
     ...assistUserView(row, target, demand, updates),
     internal_memo: row.internal_memo || "",
@@ -474,7 +494,7 @@ async function adminAssistDetail(db: Db, id: number) {
 
 async function adminUpdateAssist(db: Db, admin: Any, id: number, body: Any) {
   assertRealAdmin(admin);
-  const row = await db.assistById(id);
+  const row = await db.assistById(idNum(id));
   if (!row) throw new HttpErr(404, "未找到该申请");
   const at = iso();
   const fields: Row = { updated_at: at };
@@ -599,8 +619,8 @@ async function sourceSearch(db: Db, url: URL) {
   const assists = [];
   for (const row of await db.listAssists()) {
     if (row.status !== "已促成") continue;
-    const requester = await db.userById(row.requester_id);
-    const target = row.target_user_id ? await db.userById(row.target_user_id) : null;
+    const requester = await db.userById(idNum(row.requester_id));
+    const target = row.target_user_id ? await db.userById(idNum(row.target_user_id)) : null;
     const blob = `${row.appeal} ${requester?.real_name || ""} ${target?.real_name || ""}`;
     if (!hit(blob)) continue;
     assists.push({ id: row.id, status: row.status, appeal: row.appeal, demand_id: row.demand_id || null, requester_name: requester?.real_name || "", target_name: target?.real_name || "" });
@@ -634,7 +654,7 @@ export async function dispatchCollab(ctx: {
   if (M === "GET" && alumniOne) {
     const user = await auth();
     requireApproved(user);
-    const row = await db.userById(Number(alumniOne[1]));
+    const row = await db.userById(idNum(alumniOne[1]));
     if (!row || row.role !== "alumni" || row.audit_status !== "approved" || (isDemoActor(user) ? !row.is_demo : row.is_demo)) {
       throw new HttpErr(404, "未找到该校友");
     }
@@ -675,7 +695,7 @@ export async function dispatchCollab(ctx: {
   if (M === "GET" && caseOne) {
     const user = await auth();
     requireApproved(user);
-    const row = await db.caseById(Number(caseOne[1]));
+    const row = await db.caseById(idNum(caseOne[1]));
     if (!row || row.status !== "published") throw new HttpErr(404, "未找到该案例");
     return { handled: true, data: { case: caseOut(row) } };
   }
@@ -687,8 +707,8 @@ export async function dispatchCollab(ctx: {
     const rows = [];
     for (const row of await db.listAssists()) {
       if (status && row.status !== status) continue;
-      const requester = await db.userById(row.requester_id);
-      const target = row.target_user_id ? await db.userById(row.target_user_id) : null;
+      const requester = await db.userById(idNum(row.requester_id));
+      const target = row.target_user_id ? await db.userById(idNum(row.target_user_id)) : null;
       const hay = `${row.appeal} ${row.note} ${requester?.real_name || ""} ${target?.real_name || ""}`.toLowerCase();
       if (keyword && !hay.includes(keyword)) continue;
       rows.push({ id: row.id, status: row.status, urgency: row.urgency, appeal: row.appeal, created_at: row.created_at, requester_name: requester?.real_name || "", target_name: target?.real_name || "" });
@@ -705,12 +725,12 @@ export async function dispatchCollab(ctx: {
   if (M === "POST" && toCase) {
     const admin = await auth();
     assertRealAdmin(admin);
-    const row = await db.assistById(Number(toCase[1]));
+    const row = await db.assistById(idNum(toCase[1]));
     if (!row) throw new HttpErr(404, "未找到该申请");
     if (row.status !== "已促成") throw new HttpErr(400, "只有已促成的申请可以转为案例草稿");
-    const requester = await db.userById(row.requester_id);
-    const target = row.target_user_id ? await db.userById(row.target_user_id) : null;
-    const demand = row.demand_id ? await db.demandById(row.demand_id) : null;
+    const requester = await db.userById(idNum(row.requester_id));
+    const target = row.target_user_id ? await db.userById(idNum(row.target_user_id)) : null;
+    const demand = row.demand_id ? await db.demandById(idNum(row.demand_id)) : null;
     const saved = await db.insertCase(caseFromAssist(row, requester, target, demand, admin.id));
     return { handled: true, data: { message: "已生成成功案例草稿", case: caseOut(saved) } };
   }
@@ -731,7 +751,7 @@ export async function dispatchCollab(ctx: {
   if (M === "POST" && adminCase) {
     const admin = await auth();
     assertRealAdmin(admin);
-    const current = await db.caseById(Number(adminCase[1]));
+    const current = await db.caseById(idNum(adminCase[1]));
     if (!current) throw new HttpErr(404, "未找到该案例");
     const saved = await db.updateCase(current.id, readCaseFields(body, current));
     return { handled: true, data: { message: "案例已更新", case: caseOut(saved) } };

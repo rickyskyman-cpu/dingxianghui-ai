@@ -594,7 +594,7 @@
           <button class="dx-tab" id="inbox-tab-official" type="button" role="tab" aria-selected="false" aria-controls="inbox-official" onclick="showInboxTab('official')">官方消息</button>
         </div>
         <div id="inbox-mail" role="tabpanel">
-          <div class="dx-split">
+          <div class="dx-split dx-inbox-pane" id="inbox-pane">
             <div id="inbox-list"></div>
             <div class="dx-thread" id="inbox-thread">
               <div class="dx-state"><h2>选择一条会话</h2><p class="dx-muted">选择左侧会话后可以查看记录并回复。</p></div>
@@ -806,11 +806,12 @@
                   </select>
                 </div>
                 <div class="dx-field"><label for="broadcast-audience">发送对象</label>
-                  <select id="broadcast-audience" class="dx-select">
+                  <select id="broadcast-audience" class="dx-select" aria-describedby="broadcast-audience-help">
                     <option value="all_registered">全部注册会员</option>
                     <option value="approved">仅已审核通过会员</option>
                     <option value="campus">按校区</option>
                   </select>
+                  <span class="dx-help" id="broadcast-audience-help">当前已审核通过会员立即收到，待审核会员通过后也可在官方消息中看到。覆盖人数只计已审核通过、未被驳回的会员。</span>
                 </div>
               </div>
               <div class="dx-field"><label for="broadcast-campus">校区</label><input id="broadcast-campus" class="dx-input" placeholder="按校区发送时填写，如 深圳校区"></div>
