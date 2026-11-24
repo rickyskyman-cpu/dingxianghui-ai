@@ -4,8 +4,11 @@ import { completeJson, maskFreeText, parseRankings, PROMPT_VERSION } from "./dee
 import { codeHash, phoneHash, randomCode, sendSms, smsConfig } from "./sms.ts";
 import { exchangeCode, randomState, redirectAllowed, startUrl, wechatConfig } from "./wechat.ts";
 import type { Db, Row } from "./db.ts";
+import { HttpErr } from "./errors.ts";
+import { dispatchCollab } from "./collab.ts";
 
 type Any = any;
+export { HttpErr };
 const DEMO_PHONES = ["13800138001", "13800138002", "13800138003", "13800138000"];
 const SESSION_DAYS = 7;
 const LOGIN_WINDOW_SECONDS = 600;
@@ -15,10 +18,6 @@ const CARD_MAX = 5 * 1024 * 1024;
 const CARD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const AUDIO_TYPES = new Set(["audio/webm", "audio/wav", "audio/mpeg", "audio/mp4", "audio/ogg", "audio/webm;codecs=opus"]);
 
-export class HttpErr extends Error {
-  status: number;
-  constructor(status: number, msg: string) { super(msg); this.status = status; }
-}
 const clean = (v: Any, max = 500) => String(v ?? "").replace(/</g, "＜").replace(/>/g, "＞").trim().slice(0, max);
 const cleanList = (v: Any, maxItems = 8) =>
   (Array.isArray(v) ? v : String(v ?? "").split(/[,，、]/)).map((x: Any) => clean(x, 30)).filter(Boolean).slice(0, maxItems);
@@ -56,6 +55,30 @@ function emptyResponse(status: number, headers: Record<string, string>) {
   return new Response(null, { status, headers: next });
 }
 
+function profileCompleteness(u: Any) {
+  const tags = J(u.industry_tags);
+  const provide = J(u.can_provide_types);
+  const checks = [
+    [...String(u.bio_detail || "")].length >= 20,
+    [...String(u.core_capabilities || "")].length >= 8,
+    String(u.company || "").trim().length > 0,
+    String(u.position || "").trim().length > 0,
+    String(u.city || "").trim().length > 0,
+    String(u.campus || "").trim().length > 0,
+    String(u.enroll_year || "").trim().length > 0,
+    provide.length > 0,
+    tags.length > 0,
+    String(u.seeking || u.coop_modes || "").trim().length > 0,
+  ];
+  const filled = checks.filter(Boolean).length;
+  return {
+    percent: Math.round((filled / checks.length) * 100),
+    filled,
+    total: checks.length,
+    updated_at: u.profile_updated_at || null,
+    openness: u.openness || "开放对接",
+  };
+}
 function privateUser(u: Any) {
   const { pw_hash: _p, wechat_unionid, wechat_openid, ...d } = u;
   return {
@@ -64,18 +87,30 @@ function privateUser(u: Any) {
     must_change_password: !!u.must_change_password,
     can_provide_types: J(u.can_provide_types),
     industry_tags: J(u.industry_tags),
+    openness: u.openness || "开放对接",
+    seeking: u.seeking || "",
+    profile_completeness: profileCompleteness(u),
   };
 }
 function posterName(u: Any) {
   return u ? `${maskPerson(u.real_name)} · ${u.enroll_year || ""} ${dept0(u.department)}`.trim() : "认证校友";
 }
 const postType = (cat: string) => /供给|找客户|产能/.test(cat || "") ? "供给" : "需求";
+function demandPublic(d: Any) {
+  const life = d.lifecycle || "进行中";
+  return life === "进行中" || life === "已对接完成";
+}
+function liveDemands(rows: Any[]) {
+  return rows.filter((d) => !d.lifecycle || d.lifecycle === "进行中" || d.lifecycle === "已对接完成");
+}
 function postOut(d: Any, u: Any) {
   const desc = String(d.description || "");
+  const stamp = d.updated_at || d.created_at || "";
   return {
     id: d.id, demand_code: d.demand_code, title: d.title, post_type: postType(d.category), category: d.category,
     industry: d.industry, city: d.city, tags: J(d.tags), summary: [...desc].slice(0, 90).join("") + ([...desc].length > 90 ? "…" : ""),
-    budget_scale: d.budget_scale, poster: posterName(u), created_at: String(d.created_at || "").slice(0, 10), is_mine: false,
+    budget_scale: d.budget_scale, poster: posterName(u), created_at: String(stamp).slice(0, 10),
+    updated_at: d.updated_at || null, lifecycle: d.lifecycle || "进行中", owner_id: d.user_id, is_mine: false,
   };
 }
 function demandOut(d: Any, lookup: Record<number, Any>) {
@@ -139,23 +174,72 @@ async function overview(db: Db) {
   };
 }
 
+function alumniPublic(u: Any, viewerId: number) {
+  const tags = J(u.industry_tags);
+  const provide = J(u.can_provide_types);
+  return {
+    id: u.id,
+    masked_name: `${maskPerson(u.real_name)} · ${u.enroll_year || ""} ${dept0(u.department)}`.trim(),
+    campus: u.campus || "",
+    enroll_year: u.enroll_year || "",
+    department: dept0(u.department),
+    city: u.city || "",
+    company_masked: maskCompany(u.company || "", u.city || ""),
+    position: u.position || "",
+    industry_tags: tags,
+    can_provide_types: provide,
+    capability_summary: [...String(u.core_capabilities || "")].slice(0, 120).join(""),
+    bio_summary: [...String(u.bio_detail || "")].slice(0, 160).join(""),
+    seeking: [...String(u.seeking || u.coop_modes || "")].slice(0, 160).join(""),
+    openness: u.openness || "开放对接",
+    profile_updated_at: u.profile_updated_at || null,
+    is_self: u.id === viewerId,
+  };
+}
+function campusHit(value: string, query: string) {
+  if (!query) return true;
+  const a = String(value || "");
+  const b = String(query || "");
+  return a.includes(b) || b.includes(a);
+}
 async function search(db: Db, u: Any, url: URL) {
   requireApproved(u);
   const kw = clean(url.searchParams.get("keyword"), 40).toLowerCase();
   const ind = clean(url.searchParams.get("industry"), 30);
   const type = clean(url.searchParams.get("type"), 4);
+  const city = clean(url.searchParams.get("city"), 20);
+  const campus = clean(url.searchParams.get("campus"), 30);
+  const openness = clean(url.searchParams.get("openness"), 20);
+  const capability = clean(url.searchParams.get("capability"), 40).toLowerCase();
   await db.bumpQuery();
   const users = (await db.usersBrief()).filter((x) => !isDemoActor(u) || x.is_demo);
   const lk: Record<number, Any> = Object.fromEntries(users.map((x) => [x.id, x]));
-  let rows = await db.demandsRecent(500);
+  let rows = (await db.demandsRecent(500)).filter(demandPublic);
   if (isDemoActor(u)) rows = rows.filter((d) => d.is_demo);
   const results = rows.map((d) => ({ ...postOut(d, lk[d.user_id]), is_mine: d.user_id === u.id })).filter((p) => {
     if (ind && p.industry !== ind && !p.tags.includes(ind)) return false;
     if (type && p.post_type !== type) return false;
+    if (city && p.city !== city && !String(p.city || "").includes(city)) return false;
     if (kw && !`${p.title} ${p.summary} ${p.industry} ${p.category} ${p.city} ${p.tags.join(" ")}`.toLowerCase().includes(kw)) return false;
     return true;
-  }).slice(0, 50);
-  return { results, total_shown: results.length };
+  }).sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)) || b.id - a.id).slice(0, 50);
+  let people = (await db.approvedAlumni()).filter((x) => x.id !== u.id && x.role === "alumni");
+  people = people.filter((x) => isDemoActor(u) ? x.is_demo : !x.is_demo);
+  const alumni = people.filter((x) => {
+    if (openness && (x.openness || "开放对接") !== openness) return false;
+    if (city && x.city !== city && !String(x.city || "").includes(city)) return false;
+    if (!campusHit(x.campus || "", campus)) return false;
+    const provide = J(x.can_provide_types).join(" ");
+    const tags = J(x.industry_tags).join(" ");
+    if (ind && x.industry !== ind && !tags.includes(ind) && !String(x.core_capabilities || "").includes(ind)) return false;
+    if (capability && !`${provide} ${x.core_capabilities || ""} ${tags} ${x.seeking || ""}`.toLowerCase().includes(capability)) return false;
+    if (kw) {
+      const hay = [x.real_name, x.city, x.campus, x.position, x.department, x.company, x.core_capabilities, x.bio_detail, x.seeking, x.coop_modes, tags, provide].join(" ").toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  }).slice(0, 50).map((x) => alumniPublic(x, u.id));
+  return { results, alumni, total_shown: results.length, alumni_shown: alumni.length };
 }
 
 async function feed(db: Db, u: Any) {
@@ -164,7 +248,7 @@ async function feed(db: Db, u: Any) {
   let users = await db.approvedAlumni();
   if (isDemoActor(u)) users = users.filter((x) => x.is_demo);
   const lk: Record<number, Any> = Object.fromEntries(users.map((x) => [x.id, x]));
-  let rows = await db.demandsRecent(500);
+  let rows = (await db.demandsRecent(500)).filter(demandPublic);
   if (isDemoActor(u)) rows = rows.filter((d) => d.is_demo);
   const rel = (tags: string[], ind = "") => tags.filter((t) => mine.has(t)).concat(mine.has(ind) && !tags.includes(ind) ? [ind] : []);
   const posts = rows.filter((d) => d.user_id !== u.id).map((d) => {
@@ -172,10 +256,11 @@ async function feed(db: Db, u: Any) {
     return { ...postOut(d, lk[d.user_id]), related_fields: r, _score: r.length };
   }).filter((p) => mine.size === 0 || p._score > 0)
     .sort((a, b) => b._score - a._score || b.id - a.id).slice(0, 30).map(({ _score, ...p }) => p);
-  const alumni = users.filter((x) => x.id !== u.id && x.profile_completed).map((x) => {
+  const alumni = users.filter((x) => x.id !== u.id && x.profile_completed && (isDemoActor(u) ? x.is_demo : !x.is_demo)).map((x) => {
     const tags = J(x.industry_tags); const r = rel(tags);
-    return { poster: posterName(x), city: x.city, industry_tags: tags, related_fields: r,
-      capability_summary: [...String(x.core_capabilities || "")].slice(0, 70).join(""), can_provide_types: J(x.can_provide_types), _s: r.length };
+    return { user_id: x.id, poster: posterName(x), city: x.city, campus: x.campus || "", openness: x.openness || "开放对接", industry_tags: tags, related_fields: r,
+      capability_summary: [...String(x.core_capabilities || "")].slice(0, 70).join(""), seeking: [...String(x.seeking || "")].slice(0, 80).join(""),
+      can_provide_types: J(x.can_provide_types), _s: r.length };
   }).filter((x) => mine.size === 0 || x._s > 0).sort((a, b) => b._s - a._s).slice(0, 12).map(({ _s, ...x }) => x);
   return { my_fields: [...mine], posts, alumni };
 }
@@ -272,16 +357,29 @@ async function me(db: Db, u: Any) {
   return { user: privateUser(u), my_demands, my_matches };
 }
 
+const OPENNESS = new Set(["开放对接", "重点寻合作", "暂不打扰"]);
 async function saveProfile(db: Db, u: Any, body: Any) {
   if (u.must_change_password) throw new HttpErr(403, "请先修改临时密码");
   if (u.audit_status !== "approved" && !isRealAdmin(u)) throw new HttpErr(403, "您的实名认证与校友卡尚未通过平台审核，审核通过后方可保存个人能力画像。");
   const bio = clean(body.bio_detail, 1200), cap = clean(body.core_capabilities, 600);
   if ([...bio].length < 20 || [...cap].length < 8) throw new HttpErr(400, "原则上要求注册校友先把自己的情况介绍清楚（个人与企业情况不少于20字，并明确核心可提供能力），才能解锁需求提交。");
+  const openness = clean(body.openness, 20) || u.openness || "开放对接";
+  if (!OPENNESS.has(openness)) throw new HttpErr(400, "请选择开放对接、重点寻合作或暂不打扰");
+  const keep = (key: string, max: number) => (body[key] !== undefined ? clean(body[key], max) : clean(u[key], max));
   const x = await db.updateProfile(u.id, {
     bio_detail: bio, core_capabilities: cap,
     can_provide_types: JSON.stringify(cleanList(body.can_provide_types)),
     industry_tags: JSON.stringify(cleanList(body.industry_tags)),
-    coop_modes: clean(body.coop_modes, 400),
+    coop_modes: body.coop_modes !== undefined ? clean(body.coop_modes, 400) : clean(u.coop_modes, 400),
+    company: keep("company", 60),
+    position: keep("position", 40),
+    city: keep("city", 20),
+    campus: keep("campus", 30),
+    enroll_year: keep("enroll_year", 20),
+    department: keep("department", 60),
+    seeking: body.seeking !== undefined ? clean(body.seeking, 400) : clean(u.seeking, 400),
+    openness,
+    profile_updated_at: now(),
   });
   return { message: "个人与企业情况及核心能力画像已保存！系统已为您解锁【第二步：提交项目合作需求与AI智能匹配】权限。", user: privateUser(x) };
 }
@@ -299,7 +397,7 @@ async function createDemand(db: Db, env: Record<string, string | undefined>, fet
   };
   if (d.title.length < 4 || d.description.length < 10) throw new HttpErr(400, "请填写需求标题与需求描述");
   let users = await db.approvedUsers();
-  let all = await db.allDemands();
+  let all = liveDemands(await db.allDemands());
   if (isDemoActor(u)) {
     users = users.filter((x) => x.is_demo);
     all = all.filter((x) => x.is_demo);
@@ -405,7 +503,7 @@ async function demandMatch(db: Db, u: Any, env: Record<string, string | undefine
   if (!owner && !admin) throw new HttpErr(404, "未找到该商机需求");
   if (isDemoActor(u) && !row.is_demo) throw new HttpErr(404, "未找到该商机需求");
   let users = await db.approvedUsers();
-  let all = await db.allDemands();
+  let all = liveDemands(await db.allDemands());
   if (isDemoActor(u)) {
     users = users.filter((x) => x.is_demo);
     all = all.filter((x) => x.is_demo);
@@ -729,7 +827,12 @@ export async function handle(req: Request, ctx: { db: Db; env?: Record<string, s
     }
     const M = req.method;
     let data: Any;
-    if (M === "GET" && (path === "/" || path === "/api/health")) data = { ok: true, service: "dingxianghui-api" };
+    const collab = await dispatchCollab({
+      db, env, method: M, path, body, url,
+      auth: (required = true) => authUser(req, db, env, required),
+    });
+    if (collab.handled) data = collab.data;
+    else if (M === "GET" && (path === "/" || path === "/api/health")) data = { ok: true, service: "dingxianghui-api" };
     else if (M === "GET" && path === "/api/public/overview") data = await overview(db);
     else if (M === "GET" && (path === "/api/auth/channels" || path === "/api/auth/options")) data = channelStatus(env);
     else if (M === "POST" && (path === "/api/auth/sms/send" || path === "/sms/send")) data = await smsSend(db, env, fetchImpl, req, body);
@@ -782,7 +885,7 @@ export async function handle(req: Request, ctx: { db: Db; env?: Record<string, s
       if (!row || row.user_id !== user.id) throw new HttpErr(404, "未找到该商机需求");
       if (isDemoActor(user) && !row.is_demo) throw new HttpErr(404, "未找到该商机需求");
       let users = await db.approvedUsers();
-      let all = await db.allDemands();
+      let all = liveDemands(await db.allDemands());
       if (isDemoActor(user)) {
         users = users.filter((x) => x.is_demo);
         all = all.filter((x) => x.is_demo);

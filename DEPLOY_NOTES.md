@@ -8,6 +8,7 @@
 
 1. `supabase/migrations/20261107120000_dxh_security_additive.sql`
 2. `supabase/migrations/20261112020000_dxh_alt_login_ai.sql`
+3. `supabase/migrations/20261124030000_dxh_collab_inbox.sql`
 
 两份都只改 `dxh`。第二份给用户表增加 `wechat_openid` 和 `must_change_password`，给匹配表增加来源和模型字段，并新建短信验证码、微信 state、管理员审计、AI 配额和排序表。新表开启行级安全，并撤销 `public`、`anon`、`authenticated`。不改 storage，不改已有六张表的策略。
 

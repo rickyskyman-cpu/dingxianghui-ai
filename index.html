@@ -24,6 +24,8 @@
         <button class="nav-btn" id="nav-auth" type="button" onclick="switchView('auth')" hidden>登录</button>
         <button class="nav-btn" id="nav-feed" type="button" onclick="switchView('feed')" hidden>供需</button>
         <button class="nav-btn" id="nav-workspace" type="button" onclick="switchView('workspace')" hidden>能力与需求</button>
+        <button class="nav-btn" id="nav-cases" type="button" onclick="switchView('cases')" hidden>案例</button>
+        <button class="nav-btn" id="nav-inbox" type="button" onclick="switchView('inbox')" hidden>消息<span id="inbox-badge" class="nav-count" hidden>0</span></button>
         <button class="nav-btn" id="nav-admin" type="button" onclick="switchView('admin')" hidden>审核</button>
       </nav>
       <div class="session" id="header-user-status"></div>
@@ -73,6 +75,27 @@
                   <option value="">供给+需求</option>
                   <option value="供给">只看供给</option>
                   <option value="需求">只看需求</option>
+                </select>
+              </div>
+              <div class="dx-field">
+                <label for="feed-search-capability">能力 / 资源</label>
+                <input id="feed-search-capability" class="dx-input" placeholder="如 供应链、传感">
+              </div>
+              <div class="dx-field">
+                <label for="feed-search-city">城市</label>
+                <input id="feed-search-city" class="dx-input" placeholder="如 深圳">
+              </div>
+              <div class="dx-field">
+                <label for="feed-search-campus">校区</label>
+                <input id="feed-search-campus" class="dx-input" placeholder="如 深圳、威海、哈尔滨">
+              </div>
+              <div class="dx-field">
+                <label for="feed-search-openness">对接状态</label>
+                <select id="feed-search-openness" class="dx-select">
+                  <option value="">不限</option>
+                  <option value="开放对接">开放对接</option>
+                  <option value="重点寻合作">重点寻合作</option>
+                  <option value="暂不打扰">暂不打扰</option>
                 </select>
               </div>
               <div class="dx-action-bar">
@@ -281,8 +304,19 @@
             <h1>能力与需求</h1>
             <div id="ws-user-banner-info"></div>
             <div id="ws-user-banner-badges"></div>
+            <div class="dx-action-bar">
+              <button class="dx-button dx-button--secondary" type="button" onclick="openAssist()">官方协助对接</button>
+            </div>
             <div id="wechat-bind-box"></div>
           </header>
+          <div class="dx-form-card" id="my-demands-card">
+            <div class="dx-form-card__head">
+              <h2>已发布的供需</h2>
+              <button class="dx-button dx-button--secondary" type="button" onclick="selectWorkspaceStep(2)">发布新的供需</button>
+            </div>
+            <p class="dx-help">可以修改内容、切换状态、刷新更新时间，或归档。暂停、关闭和归档后不再出现在公开检索里。</p>
+            <div id="my-demands-list"></div>
+          </div>
 
           <ol class="dx-stepper" aria-label="能力与需求步骤">
             <li class="dx-stepper__item dx-stepper__item--current" id="step-tab-1">
@@ -311,6 +345,49 @@
                     <span class="dx-help" id="prof-bio-help">不少于 20 字，说明自己和企业的情况。</span>
                     <span class="dx-counter" id="prof-bio-count">0 / 1200</span>
                   </div>
+                </div>
+                <div id="profile-meta" class="dx-help"></div>
+                <div class="dx-field">
+                  <label for="prof-openness">当前对接状态</label>
+                  <select id="prof-openness" class="dx-select">
+                    <option value="开放对接">开放对接</option>
+                    <option value="重点寻合作">重点寻合作</option>
+                    <option value="暂不打扰">暂不打扰</option>
+                  </select>
+                  <span class="dx-help">其他校友检索时能看到这个状态。暂不打扰仍可收到站内信。</span>
+                </div>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="prof-company">公司</label>
+                    <input class="dx-input" id="prof-company" maxlength="60">
+                  </div>
+                  <div class="dx-field">
+                    <label for="prof-position">职务</label>
+                    <input class="dx-input" id="prof-position" maxlength="40">
+                  </div>
+                </div>
+                <div class="dx-field-row">
+                  <div class="dx-field">
+                    <label for="prof-city">常驻城市</label>
+                    <input class="dx-input" id="prof-city" maxlength="20">
+                  </div>
+                  <div class="dx-field">
+                    <label for="prof-campus">校区</label>
+                    <select id="prof-campus" class="dx-select">
+                      <option value="校本部(哈尔滨)">哈尔滨</option>
+                      <option value="威海校区">威海</option>
+                      <option value="深圳校区">深圳</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="dx-field">
+                  <label for="prof-year">届别</label>
+                  <input class="dx-input" id="prof-year" maxlength="20">
+                </div>
+                <div class="dx-field">
+                  <label for="prof-seeking">近期寻找的合作方向</label>
+                  <textarea class="dx-textarea" id="prof-seeking" maxlength="400" aria-describedby="prof-seeking-count"></textarea>
+                  <div class="dx-field__meta"><span class="dx-help">选填。保存后即可在检索和匹配中使用。</span><span class="dx-counter" id="prof-seeking-count">0 / 400</span></div>
                 </div>
               </div>
               <div class="dx-form-card">
@@ -484,13 +561,118 @@
         </div>
       </div>
     </section>
+    <section class="view-section" id="view-cases">
+      <div class="dx-container">
+        <header class="dx-page-head">
+          <h1>成功案例</h1>
+          <p class="dx-muted">这里只展示已经发布的合作案例。称谓经过脱敏，不包含手机号等联系方式。</p>
+        </header>
+        <form class="dx-form-card" onsubmit="event.preventDefault();loadCases()">
+          <div class="dx-field-row">
+            <div class="dx-field">
+              <label for="case-keyword">关键词</label>
+              <input id="case-keyword" class="dx-input">
+            </div>
+            <div class="dx-field">
+              <label for="case-field">合作领域</label>
+              <input id="case-field" class="dx-input" placeholder="如 智能制造">
+            </div>
+          </div>
+          <button class="dx-button" type="submit">筛选</button>
+        </form>
+        <div id="case-list"></div>
+      </div>
+    </section>
+    <section class="view-section" id="view-inbox">
+      <div class="dx-container">
+        <header class="dx-page-head">
+          <h1>站内信</h1>
+          <p class="dx-muted">校友留言按最新消息排序。官方消息包含全员公告和协助对接进度。打开会话后自动标为已读。</p>
+        </header>
+        <div class="dx-tabs" role="tablist" aria-label="站内信分类">
+          <button class="dx-tab" id="inbox-tab-mail" type="button" role="tab" aria-selected="true" aria-controls="inbox-mail" onclick="showInboxTab('mail')">校友留言</button>
+          <button class="dx-tab" id="inbox-tab-official" type="button" role="tab" aria-selected="false" aria-controls="inbox-official" onclick="showInboxTab('official')">官方消息</button>
+        </div>
+        <div id="inbox-mail" role="tabpanel">
+          <div class="dx-split">
+            <div id="inbox-list"></div>
+            <div class="dx-thread" id="inbox-thread">
+              <div class="dx-state"><h2>选择一条会话</h2><p class="dx-muted">选择左侧会话后可以查看记录并回复。</p></div>
+            </div>
+          </div>
+        </div>
+        <div id="inbox-official" role="tabpanel" hidden>
+          <div class="dx-action-bar">
+            <button class="dx-button dx-button--secondary" type="button" onclick="markAllNoticesRead()">全部标为已读</button>
+          </div>
+          <div id="notice-list"></div>
+        </div>
+      </div>
+    </section>
+    <section class="view-section" id="view-assist">
+      <div class="dx-container">
+        <header class="dx-page-head">
+          <h1>官方协助对接</h1>
+          <p class="dx-muted">由工作人员跟进的协助申请。这里不涉及收费说明，进度会同步到站内官方消息。</p>
+        </header>
+        <form id="assist-form" class="dx-form-shell" onsubmit="handleAssistSubmit(event)">
+          <div class="dx-form-card">
+            <div class="dx-form-alert" id="assist-error" hidden role="alert"></div>
+            <div class="dx-field-row">
+              <div class="dx-field">
+                <label for="assist-target">目标校友编号</label>
+                <input id="assist-target" class="dx-input" inputmode="numeric" aria-describedby="assist-target-help">
+                <span class="dx-help" id="assist-target-help">选填。从匹配或校友卡片发起时会自动填入。</span>
+              </div>
+              <div class="dx-field">
+                <label for="assist-demand">关联需求编号</label>
+                <input id="assist-demand" class="dx-input" inputmode="numeric">
+              </div>
+            </div>
+            <div class="dx-field">
+              <label for="assist-appeal">具体合作诉求<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+              <textarea id="assist-appeal" class="dx-textarea" maxlength="2000" required></textarea>
+            </div>
+            <div class="dx-field">
+              <label for="assist-help">希望协助的事项</label>
+              <textarea id="assist-help" class="dx-textarea" maxlength="1000"></textarea>
+            </div>
+            <div class="dx-field-row">
+              <div class="dx-field">
+                <label for="assist-time">期望联系时间</label>
+                <input id="assist-time" class="dx-input" maxlength="80" placeholder="如 工作日下午">
+              </div>
+              <div class="dx-field">
+                <label for="assist-urgency">紧急程度</label>
+                <select id="assist-urgency" class="dx-select">
+                  <option value="普通">普通</option>
+                  <option value="较急">较急</option>
+                  <option value="紧急">紧急</option>
+                </select>
+              </div>
+            </div>
+            <div class="dx-field">
+              <label for="assist-note">补充备注</label>
+              <input id="assist-note" class="dx-input" maxlength="500">
+            </div>
+            <p id="assist-context" class="dx-help"></p>
+            <button class="dx-button" type="submit" id="assist-submit">提交协助申请</button>
+          </div>
+        </form>
+        <h2>我的对接申请</h2>
+        <div id="assist-list"></div>
+      </div>
+    </section>
     <section class="view-section" id="view-admin">
       <div class="dx-admin">
         <aside class="dx-admin__sidebar">
           <p class="dx-brand-lockup" style="color:#fff"><img class="dx-brandmark" src="assets/logo/logo-mark-reverse.svg" width="40" height="40" alt=""><span class="dx-brand">审核后台<small>中心节点</small></span></p>
           <nav class="dx-admin__nav" aria-label="后台分区">
-            <a href="#admin-queue" class="is-current">审核队列</a>
-            <a href="#admin-matches">对接工单</a>
+            <a href="#admin-queue" data-admin-tab="queue" aria-current="page" onclick="showAdminTab('queue'); return false;">审核队列</a>
+            <a href="#admin-matches" data-admin-tab="matches" onclick="showAdminTab('matches'); return false;">对接工单</a>
+            <a href="#admin-assists" data-admin-tab="assists" onclick="showAdminTab('assists'); return false;">真人协助</a>
+            <a href="#admin-cases" data-admin-tab="cases" onclick="showAdminTab('cases'); return false;">成功案例</a>
+            <a href="#admin-broadcast" data-admin-tab="broadcast" onclick="showAdminTab('broadcast'); return false;">全员群发</a>
           </nav>
         </aside>
         <div class="dx-admin__main">
@@ -533,9 +715,108 @@
               </aside>
             </div>
           </section>
-          <section id="admin-matches">
+          <section id="admin-matches" hidden>
             <h2>对接与撮合工单</h2>
             <div id="admin-matches-list"></div>
+          </section>
+          <section id="admin-assists" hidden>
+            <h2>真人协助对接</h2>
+            <form class="dx-field-row" onsubmit="event.preventDefault();loadAdminAssists()">
+              <div class="dx-field">
+                <label for="admin-assist-keyword">关键词</label>
+                <input id="admin-assist-keyword" class="dx-input">
+              </div>
+              <div class="dx-field">
+                <label for="admin-assist-status">状态</label>
+                <select id="admin-assist-status" class="dx-select">
+                  <option value="">全部</option>
+                  <option>待受理</option>
+                  <option>评估中</option>
+                  <option>对接中</option>
+                  <option>已促成</option>
+                  <option>已关闭</option>
+                </select>
+              </div>
+            </form>
+            <button class="dx-button dx-button--secondary" type="button" onclick="loadAdminAssists()">检索</button>
+            <div id="admin-assist-list"></div>
+            <div id="admin-assist-detail"></div>
+          </section>
+          <section id="admin-cases" hidden>
+            <h2>成功案例</h2>
+            <form id="admin-case-form" class="dx-form-card" onsubmit="saveAdminCase(event)">
+              <input type="hidden" id="case-id" value="">
+              <div class="dx-field"><label for="case-title">案例标题<span class="dx-req" aria-hidden="true">*</span></label><input id="case-title" class="dx-input" maxlength="80" required></div>
+              <div class="dx-field-row">
+                <div class="dx-field"><label for="case-domain">合作领域 / 标签</label><input id="case-domain" class="dx-input" maxlength="120"></div>
+                <div class="dx-field"><label for="case-when">促成时间</label><input id="case-when" class="dx-input" maxlength="20" placeholder="2026-11-24"></div>
+              </div>
+              <div class="dx-field"><label for="case-names">对外展示的校友称谓</label><input id="case-names" class="dx-input" maxlength="160" aria-describedby="case-names-help"><span class="dx-help" id="case-names-help">使用脱敏称谓，不要写手机号。</span></div>
+              <div class="dx-field"><label for="case-background">合作背景与诉求</label><textarea id="case-background" class="dx-textarea" maxlength="4000"></textarea></div>
+              <div class="dx-field"><label for="case-highlight">促成方式与亮点</label><textarea id="case-highlight" class="dx-textarea" maxlength="2000"></textarea></div>
+              <div class="dx-field"><label for="case-outcome">合作成果与价值</label><textarea id="case-outcome" class="dx-textarea" maxlength="4000"></textarea></div>
+              <div class="dx-field-row">
+                <div class="dx-field"><label for="case-status">发布状态</label>
+                  <select id="case-status" class="dx-select"><option value="draft">草稿</option><option value="published">已发布</option><option value="archived">已下架</option></select>
+                </div>
+                <div class="dx-field"><label for="case-featured">精选</label>
+                  <select id="case-featured" class="dx-select"><option value="0">否</option><option value="1">是</option></select>
+                </div>
+              </div>
+              <div class="dx-field-row">
+                <div class="dx-field"><label for="case-assist-id">关联对接单</label><input id="case-assist-id" class="dx-input" inputmode="numeric"></div>
+                <div class="dx-field"><label for="case-demand-id">关联需求</label><input id="case-demand-id" class="dx-input" inputmode="numeric"></div>
+              </div>
+              <div class="dx-action-bar">
+                <button class="dx-button" type="submit" id="case-save">保存案例</button>
+                <button class="dx-button dx-button--text" type="button" onclick="resetCaseForm()">清空表单</button>
+              </div>
+            </form>
+            <form class="dx-field-row" onsubmit="event.preventDefault();loadAdminCases()">
+              <div class="dx-field"><label for="admin-case-keyword">检索案例</label><input id="admin-case-keyword" class="dx-input"></div>
+              <div class="dx-field"><label for="admin-case-field">领域</label><input id="admin-case-field" class="dx-input"></div>
+              <div class="dx-field"><label for="admin-case-status">状态</label>
+                <select id="admin-case-status" class="dx-select"><option value="">全部</option><option value="draft">草稿</option><option value="published">已发布</option><option value="archived">已下架</option></select>
+              </div>
+              <div class="dx-field"><label for="admin-case-featured">精选</label>
+                <select id="admin-case-featured" class="dx-select"><option value="">全部</option><option value="1">仅精选</option><option value="0">非精选</option></select>
+              </div>
+            </form>
+            <button class="dx-button dx-button--secondary" type="button" onclick="loadAdminCases()">检索案例</button>
+            <div class="dx-field" style="margin-top:16px">
+              <label for="admin-source-keyword">调取已促成对接、供需与校友</label>
+              <input id="admin-source-keyword" class="dx-input">
+            </div>
+            <button class="dx-button dx-button--secondary" type="button" onclick="loadCaseSources()">检索背景</button>
+            <div id="admin-source-list"></div>
+            <div id="admin-case-list"></div>
+          </section>
+          <section id="admin-broadcast" hidden>
+            <h2>全员群发</h2>
+            <form id="broadcast-form" class="dx-form-card" onsubmit="sendBroadcast(event)">
+              <div class="dx-field"><label for="broadcast-title">标题<span class="dx-req" aria-hidden="true">*</span></label><input id="broadcast-title" class="dx-input" maxlength="80" required></div>
+              <div class="dx-field"><label for="broadcast-body">正文<span class="dx-req" aria-hidden="true">*</span></label><textarea id="broadcast-body" class="dx-textarea" maxlength="4000" required></textarea></div>
+              <div class="dx-field-row">
+                <div class="dx-field"><label for="broadcast-category">消息分类</label>
+                  <select id="broadcast-category" class="dx-select">
+                    <option>系统公告</option>
+                    <option>活动通知</option>
+                    <option>供需精选</option>
+                    <option>重要提醒</option>
+                  </select>
+                </div>
+                <div class="dx-field"><label for="broadcast-audience">发送对象</label>
+                  <select id="broadcast-audience" class="dx-select">
+                    <option value="all_registered">全部注册会员</option>
+                    <option value="approved">仅已审核通过会员</option>
+                    <option value="campus">按校区</option>
+                  </select>
+                </div>
+              </div>
+              <div class="dx-field"><label for="broadcast-campus">校区</label><input id="broadcast-campus" class="dx-input" placeholder="按校区发送时填写，如 深圳校区"></div>
+              <button class="dx-button" type="submit" id="broadcast-submit">发送公告</button>
+            </form>
+            <div id="admin-broadcast-list"></div>
           </section>
         </div>
       </div>
@@ -551,6 +832,40 @@
     <h2 id="channel-dialog-title">微信与短信</h2>
     <p>微信扫码、微信内授权和短信都没有接入真实服务时，这里不会显示已启用，也不能当作两步验证或严格双因子。</p>
     <button class="dx-button" type="button" id="close-channel-dialog" onclick="document.getElementById('channel-dialog').close()">关闭</button>
+  </dialog>
+  <dialog id="compose-dialog" class="dx-dialog" aria-labelledby="compose-title">
+    <h2 id="compose-title">发站内信</h2>
+    <p id="compose-context" class="dx-help"></p>
+    <form onsubmit="sendCompose(event)">
+      <div class="dx-field">
+        <label for="compose-body">留言<span class="dx-req" aria-hidden="true">*</span><span class="dx-sr-only">（必填）</span></label>
+        <textarea id="compose-body" class="dx-textarea" maxlength="800" required></textarea>
+        <span class="dx-help">最多 800 字。不会附带你的手机号。</span>
+      </div>
+      <div class="dx-action-bar">
+        <button class="dx-button" type="submit" id="compose-submit">发送</button>
+        <button class="dx-button dx-button--secondary" type="button" onclick="document.getElementById('compose-dialog').close()">关闭</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="demand-edit-dialog" class="dx-dialog" aria-labelledby="demand-edit-title">
+    <h2 id="demand-edit-title">编辑供需</h2>
+    <form onsubmit="saveDemandEdit(event)">
+      <div class="dx-field"><label for="edit-title">标题</label><input id="edit-title" class="dx-input" maxlength="120" required></div>
+      <div class="dx-field"><label for="edit-desc">描述</label><textarea id="edit-desc" class="dx-textarea" maxlength="2000" required></textarea></div>
+      <div class="dx-field-row">
+        <div class="dx-field"><label for="edit-category">类别</label><input id="edit-category" class="dx-input" maxlength="30"></div>
+        <div class="dx-field"><label for="edit-industry">行业</label><input id="edit-industry" class="dx-input" maxlength="30"></div>
+      </div>
+      <div class="dx-field-row">
+        <div class="dx-field"><label for="edit-city">城市</label><input id="edit-city" class="dx-input" maxlength="20"></div>
+        <div class="dx-field"><label for="edit-tags">标签</label><input id="edit-tags" class="dx-input"></div>
+      </div>
+      <div class="dx-action-bar">
+        <button class="dx-button" type="submit">保存</button>
+        <button class="dx-button dx-button--secondary" type="button" onclick="document.getElementById('demand-edit-dialog').close()">关闭</button>
+      </div>
+    </form>
   </dialog>
   <div class="dx-toast-region" id="global-toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
